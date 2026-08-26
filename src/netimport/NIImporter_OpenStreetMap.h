@@ -182,7 +182,7 @@ protected:
     class Edge : public Parameterised {
     public:
         explicit Edge(long long int _id) :
-            id(_id), myNoLanes(-1), myNoLanesForwardExplicit(0), myNoLanesBackwardExplicit(0),
+            id(_id), myNoLanes(-1), myNoLanesForwardExplicit(0), myNoLanesBackwardExplicit(0), myNoLanesBothWays(0),
             myMaxSpeed(MAXSPEED_UNGIVEN),
             myMaxSpeedBackward(MAXSPEED_UNGIVEN),
             myExtraAllowed(0),
@@ -218,6 +218,8 @@ protected:
         int myNoLanesForwardExplicit;
         /// @brief Explicitly tagged lanes:backward count (0 if unset).
         int myNoLanesBackwardExplicit;
+        /// @brief Explicitly tagged lanes:both_ways count (0 if unset).
+        int myNoLanesBothWays;
         /// @brief maximum speed in km/h, or MAXSPEED_UNGIVEN
         double myMaxSpeed;
         /// @brief maximum speed in km/h, or MAXSPEED_UNGIVEN

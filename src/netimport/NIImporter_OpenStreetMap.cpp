@@ -702,7 +702,19 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
             numLanesBackward = e->myNoLanesBackwardExplicit > 0 ? e->myNoLanesBackwardExplicit : e->myNoLanes;
         } else {
             // Both directions present
-            if (e->myNoLanesForwardExplicit > 0 && e->myNoLanesBackwardExplicit > 0) {
+            if (e->myNoLanesBothWays > 0) {
+                // Two-Way Left-Turn Lane (TWLTL): share center lane capacity
+                if (e->myNoLanesForwardExplicit > 0 && e->myNoLanesBackwardExplicit > 0) {
+                    numLanesForward = e->myNoLanesForwardExplicit + e->myNoLanesBothWays;
+                    numLanesBackward = e->myNoLanesBackwardExplicit + e->myNoLanesBothWays;
+                } else {
+                    const int throughTotal = MAX2(2, e->myNoLanes - e->myNoLanesBothWays);
+                    const int fwdThrough = (int)std::ceil(throughTotal / 2.0);
+                    const int bwdThrough = throughTotal - fwdThrough;
+                    numLanesForward = fwdThrough + e->myNoLanesBothWays;
+                    numLanesBackward = bwdThrough + e->myNoLanesBothWays;
+                }
+            } else if (e->myNoLanesForwardExplicit > 0 && e->myNoLanesBackwardExplicit > 0) {
                 numLanesForward = e->myNoLanesForwardExplicit;
                 numLanesBackward = e->myNoLanesBackwardExplicit;
             } else if (e->myNoLanesForwardExplicit > 0) {
@@ -965,11 +977,14 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
     id = StringUtils::escapeXML(id);
     const std::string reverseID = "-" + id;
     const bool markOSMDirection =  from->getType() == SumoXMLNodeType::RAIL_SIGNAL || to->getType() == SumoXMLNodeType::RAIL_SIGNAL;
+    NBEdge* nbeForward = nullptr;
+    NBEdge* nbeBackward = nullptr;
     if (addForward) {
         assert(numLanesForward > 0);
         NBEdge* nbe = new NBEdge(id, from, to, type, speed, NBEdge::UNSPECIFIED_FRICTION, numLanesForward, tc.getEdgeTypePriority(type),
                                  forwardWidth, NBEdge::UNSPECIFIED_OFFSET, shape, lsf,
                                  StringUtils::escapeXML(streetName), origID, true);
+        nbeForward = nbe;
         if (markOSMDirection) {
             nbe->setParameter(NBTrafficLightDefinition::OSM_DIRECTION, "forward");
         }
@@ -1052,6 +1067,7 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
         NBEdge* nbe = new NBEdge(reverseID, to, from, type, speedBackward, NBEdge::UNSPECIFIED_FRICTION, numLanesBackward, tc.getEdgeTypePriority(type),
                                  backwardWidth, NBEdge::UNSPECIFIED_OFFSET, shape.reverse(), lsf,
                                  StringUtils::escapeXML(streetName), origID, true);
+        nbeBackward = nbe;
         if (markOSMDirection) {
             nbe->setParameter(NBTrafficLightDefinition::OSM_DIRECTION, "backward");
         }
@@ -1122,6 +1138,27 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
             delete nbe;
             throw ProcessError(TLF("Could not add edge '-%'.", id));
         }
+    }
+    if (e->myNoLanesBothWays > 0 && nbeForward != nullptr && nbeBackward != nullptr) {
+        const int fwdCenterIdx = lefthand ? 0 : (int)nbeForward->getLanes().size() - 1;
+        const int bwdCenterIdx = lefthand ? 0 : (int)nbeBackward->getLanes().size() - 1;
+
+        // Pair the center turn lanes with oppositeID
+        nbeForward->getLaneStruct(fwdCenterIdx).oppositeID = nbeBackward->getLaneID(bwdCenterIdx);
+        nbeBackward->getLaneStruct(bwdCenterIdx).oppositeID = nbeForward->getLaneID(fwdCenterIdx);
+
+        // Assign left-turn direction to the center lanes if no explicit turn signs were tagged
+        if (nbeForward->getLaneStruct(fwdCenterIdx).turnSigns == 0) {
+            nbeForward->getLaneStruct(fwdCenterIdx).turnSigns = (int)LinkDirection::LEFT;
+        }
+        if (nbeBackward->getLaneStruct(bwdCenterIdx).turnSigns == 0) {
+            nbeBackward->getLaneStruct(bwdCenterIdx).turnSigns = (int)LinkDirection::LEFT;
+        }
+
+        nbeForward->setParameter("lanes:both_ways", toString(e->myNoLanesBothWays));
+        nbeBackward->setParameter("lanes:both_ways", toString(e->myNoLanesBothWays));
+        nbeForward->setParameter("osm.twltl", "true");
+        nbeBackward->setParameter("osm.twltl", "true");
     }
     if ((e->myParkingType & PARKING_BOTH) != 0 && OptionsCont::getOptions().isSet("parking-output")) {
         if ((e->myParkingType & PARKING_RIGHT) != 0) {
@@ -3074,13 +3111,10 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                 WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
             }
         } else if (key == "lanes:both_ways") {
-            // OSM's center two-way left-turn lane (TWLTL). Parsed into the
-            // witness store; downstream reconciliation can use it via the
-            // lane-count balance constraint. SUMO has no native TWLTL
-            // primitive yet, so the value is recorded as a parameter for
-            // downstream consumers.
+            // OSM's center two-way left-turn lane (TWLTL).
             try {
                 const int numLanes = StringUtils::toInt(value);
+                myCurrentEdge->myNoLanesBothWays = numLanes;
                 myCurrentEdge->evidence.lanesBothWays.emplace_back(
                     numLanes, "lanes:both_ways", NIOSMConfidence::HIGH);
                 myCurrentEdge->setParameter("lanes:both_ways", value);
