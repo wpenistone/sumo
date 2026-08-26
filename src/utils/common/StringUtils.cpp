@@ -22,6 +22,8 @@
 /****************************************************************************/
 #include <config.h>
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <iostream>
 #include <cstdio>
@@ -34,6 +36,8 @@
 #else
 #include <unistd.h>
 #endif
+#include <xercesc/util/TransService.hpp>
+#include <xercesc/util/TranscodingException.hpp>
 #include <utils/common/UtilExceptions.h>
 #include <utils/common/ToString.h>
 #include <utils/common/StringTokenizer.h>
@@ -46,6 +50,7 @@
 // static member definitions
 // ===========================================================================
 std::string StringUtils::emptyString;
+XERCES_CPP_NAMESPACE::XMLLCPTranscoder* StringUtils::myLCPTranscoder = nullptr;
 
 
 // ===========================================================================
@@ -280,7 +285,6 @@ StringUtils::escapeXML(const std::string& orig, const bool maskDoubleHyphen) {
     return replace(result, "'", "&apos;");
 }
 
-
 std::string
 StringUtils::escapeShell(const std::string& orig) {
     return replace(orig, "\"", "\\\"");
@@ -296,7 +300,6 @@ StringUtils::escapeCSV(const std::string& orig, const char separator, const char
     const std::string quoteStr{quote};
     return quoteStr + replace(orig, quoteStr, {'\\', quote}) + quoteStr;
 }
-
 
 std::string
 StringUtils::urlEncode(const std::string& toEncode, const std::string encodeWhich) {
@@ -658,7 +661,11 @@ StringUtils::parseSpeed(const std::string& sData, const bool defaultKmph) {
         size_t idx = 0;
         const double result = std::stod(sData, &idx);
         if (idx != sData.size()) {
-            const std::string unit = prune(sData.substr(idx));
+            std::string unit = prune(sData.substr(idx));
+            // Case-normalize the unit so KMH / Mph / KM/H all dispatch the
+            // same as their lowercase canonical form.
+            std::transform(unit.begin(), unit.end(), unit.begin(),
+                           [](unsigned char c) { return (char)std::tolower(c); });
             if (unit == "km/h" || unit == "kph" || unit == "kmh" || unit == "kmph") {
                 return result / 3.6;
             }
@@ -668,7 +675,7 @@ StringUtils::parseSpeed(const std::string& sData, const bool defaultKmph) {
             if (unit == "mph") {
                 return result * KM_PER_MILE / 3.6;
             }
-            if (unit == "knots") {
+            if (unit == "knots" || unit == "knot" || unit == "kts") {
                 return result * 1.852 / 3.6;
             }
             throw NumberFormatException("(speed format) " + sData);
@@ -681,6 +688,62 @@ StringUtils::parseSpeed(const std::string& sData, const bool defaultKmph) {
     }
 }
 
+
+std::string
+StringUtils::transcode(const XMLCh* const data, int length) {
+    if (data == 0) {
+        throw EmptyData();
+    }
+    if (length == 0) {
+        return "";
+    }
+#if _XERCES_VERSION < 30100
+    char* t = XERCES_CPP_NAMESPACE::XMLString::transcode(data);
+    std::string result(t);
+    XERCES_CPP_NAMESPACE::XMLString::release(&t);
+    return result;
+#else
+    try {
+        XERCES_CPP_NAMESPACE::TranscodeToStr utf8(data, "UTF-8");
+        return reinterpret_cast<const char*>(utf8.str());
+    } catch (XERCES_CPP_NAMESPACE::TranscodingException&) {
+        return "?";
+    }
+#endif
+}
+
+
+std::string
+StringUtils::transcodeFromLocal(const std::string& localString) {
+#if _XERCES_VERSION > 30100
+    try {
+        if (myLCPTranscoder == nullptr) {
+            myLCPTranscoder = XERCES_CPP_NAMESPACE::XMLPlatformUtils::fgTransService->makeNewLCPTranscoder(XERCES_CPP_NAMESPACE::XMLPlatformUtils::fgMemoryManager);
+        }
+        if (myLCPTranscoder != nullptr) {
+            return transcode(myLCPTranscoder->transcode(localString.c_str()));
+        }
+    } catch (XERCES_CPP_NAMESPACE::TranscodingException&) {}
+#endif
+    return localString;
+}
+
+
+std::string
+StringUtils::transcodeToLocal(const std::string& utf8String) {
+#if _XERCES_VERSION > 30100
+    try {
+        if (myLCPTranscoder == nullptr) {
+            myLCPTranscoder = XERCES_CPP_NAMESPACE::XMLPlatformUtils::fgTransService->makeNewLCPTranscoder(XERCES_CPP_NAMESPACE::XMLPlatformUtils::fgMemoryManager);
+        }
+        if (myLCPTranscoder != nullptr) {
+            XERCES_CPP_NAMESPACE::TranscodeFromStr utf8(reinterpret_cast<const XMLByte*>(utf8String.c_str()), utf8String.size(), "UTF-8");
+            return myLCPTranscoder->transcode(utf8.str());
+        }
+    } catch (XERCES_CPP_NAMESPACE::TranscodingException&) {}
+#endif
+    return utf8String;
+}
 
 
 std::string
@@ -741,6 +804,12 @@ StringUtils::wrapText(const std::string s, int width) {
 }
 
 
+void
+StringUtils::resetTranscoder() {
+    myLCPTranscoder = nullptr;
+}
+
+
 std::string
 StringUtils::adjustDecimalValue(double value, int precision) {
     // obtain value in string format with 20 decimals precision
@@ -758,6 +827,5 @@ StringUtils::adjustDecimalValue(double value, int precision) {
     }
     return valueStr;
 }
-
 
 /****************************************************************************/

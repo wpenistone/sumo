@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- See README.md for the scenario. -->
+<osm version="0.6" generator="hand-written test fixture">
+    <node id="1" lat="50.0000" lon="10.0000"/>
+    <node id="2" lat="50.0010" lon="10.0000"/>
+
+    <way id="2000">
+        <nd ref="1"/>
+        <nd ref="2"/>
+        <tag k="highway" v="primary"/>
+        <tag k="oneway" v="yes"/>
+        <tag k="oneway:bus" v="no"/>
+        <tag k="lanes" v="2"/>
+        <tag k="lanes:backward" v="1"/>
+    </way>
+</osm>

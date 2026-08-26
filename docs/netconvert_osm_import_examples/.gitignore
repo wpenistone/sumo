@@ -1,0 +1,3 @@
+# Generated network outputs from running netconvert against the inputs
+# in this directory. Regeneratable; not worth committing.
+*/net*.xml

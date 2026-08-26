@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- See README.md. G3 fuzzy match + missing-pipe heuristic. -->
+<osm version="0.6" generator="hand-written test fixture">
+    <node id="1" lat="50.0000" lon="10.0000"/>
+    <node id="2" lat="50.0010" lon="10.0000"/>
+
+    <way id="7000">
+        <nd ref="1"/>
+        <nd ref="2"/>
+        <tag k="highway" v="primary"/>
+        <tag k="lanes" v="3"/>
+        <tag k="turn:lanes" v="lleft|throughleft|rigth"/>
+    </way>
+</osm>

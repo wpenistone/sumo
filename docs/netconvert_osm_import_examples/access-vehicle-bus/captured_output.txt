@@ -1,0 +1,12 @@
+=== access-vehicle-bus ===
+Warning: Discarding unknown compound 'bus' in type 'bus|highway.primary' (first occurrence for edge '5000').
+Success.
+
+=== net.xml lane permissions ===
+        <lane id=":1_0_0" index="0" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="3.65" length="4.67" shape="-0.11,-0.02 0.71,-1.21 1.51,-1.60 2.31,-1.19 3.09,0.02"/>
+        <lane id=":2_0_0" index="0" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="3.65" length="4.67" shape="1.60,111.20 0.78,112.39 -0.02,112.78 -0.82,112.37 -1.60,111.16"/>
+        <lane id="-5000_0" index="0" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="27.78" length="111.19" shape="-4.80,111.12 -3.31,-0.06"/>
+        <lane id="-5000_1" index="1" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="27.78" length="111.19" shape="-1.60,111.16 -0.11,-0.02"/>
+    <edge id="5000" from="1" to="2" priority="12" type="highway.primary">
+        <lane id="5000_0" index="0" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="27.78" length="111.19" shape="6.29,0.06 4.80,111.24"/>
+        <lane id="5000_1" index="1" allow="private emergency authority army vip pedestrian bus bicycle custom1 custom2" speed="27.78" length="111.19" shape="3.09,0.02 1.60,111.20"/>
