@@ -1,0 +1,85 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Run daily at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Check for upstream updates without pushing'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    name: Sync from eclipse-sumo/sumo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git Author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch Upstream
+        run: |
+          git remote add upstream https://github.com/eclipse-sumo/sumo.git || true
+          git fetch upstream main --tags
+
+      - name: Check for Upstream Changes
+        id: check_changes
+        run: |
+          BEHIND_COUNT=$(git rev-list --count HEAD..upstream/main)
+          echo "behind_count=$BEHIND_COUNT" >> $GITHUB_OUTPUT
+          echo "Fork is $BEHIND_COUNT commits behind upstream/main."
+
+      - name: Merge Upstream Changes
+        if: steps.check_changes.outputs.behind_count > 0
+        id: merge_step
+        run: |
+          echo "Attempting merge from upstream/main..."
+          if git merge --no-edit upstream/main; then
+            echo "merge_status=success" >> $GITHUB_OUTPUT
+            echo "Successfully merged upstream changes."
+          else
+            echo "merge_status=conflict" >> $GITHUB_OUTPUT
+            echo "Merge conflict detected!"
+            CONFLICTING_FILES=$(git diff --name-only --diff-filter=U)
+            echo "conflicts<<EOF" >> $GITHUB_OUTPUT
+            echo "$CONFLICTING_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            git merge --abort
+            exit 1
+          fi
+
+      - name: Push to Fork
+        if: steps.check_changes.outputs.behind_count > 0 && steps.merge_step.outputs.merge_status == 'success' && !inputs.dry_run
+        run: |
+          git push origin main
+
+      - name: Notify on Conflict
+        if: failure() && steps.merge_step.outputs.merge_status == 'conflict'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "⚠️ Upstream Sync: Merge Conflict with eclipse-sumo/sumo" \
+            --body "Automated upstream synchronization encountered conflicts while merging \`upstream/main\` into \`main\`.
+
+          ### Conflicting Files:
+          \`\`\`
+          ${{ steps.merge_step.outputs.conflicts }}
+          \`\`\`
+
+          Please resolve the conflicts manually on the fork."
