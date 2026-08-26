@@ -2944,7 +2944,7 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                     myCurrentEdge->myWidthLanesBackward = widthLanes;
                     myCurrentEdge->evidence.lanesBackward.emplace_back(
                         (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
-                } else {
+                } else if (key == "width:lanes:forward" || (key == "width:lanes" && !reverseOneway)) {
                     myCurrentEdge->myWidthLanesForward = widthLanes;
                     myCurrentEdge->evidence.lanesForward.emplace_back(
                         (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
