@@ -293,12 +293,13 @@ StringUtils::escapeShell(const std::string& orig) {
 
 std::string
 StringUtils::escapeCSV(const std::string& orig, const char separator, const char quote) {
-    const std::string chars{separator, quote};
+    const std::string chars = std::string(1, separator) + quote + "\r\n";
     if (orig.find_first_of(chars) == std::string::npos) {
         return orig;
     }
-    const std::string quoteStr{quote};
-    return quoteStr + replace(orig, quoteStr, {'\\', quote}) + quoteStr;
+    const std::string quoteStr(1, quote);
+    const std::string escapedQuote = quoteStr + quoteStr;
+    return quoteStr + replace(orig, quoteStr, escapedQuote) + quoteStr;
 }
 
 std::string
@@ -658,8 +659,14 @@ StringUtils::parseSpeed(const std::string& sData, const bool defaultKmph) {
         throw EmptyData();
     }
     try {
+        std::string cleanData = sData;
+        const size_t commaPos = cleanData.find(',');
+        if (commaPos != std::string::npos && commaPos > 0 && commaPos + 1 < cleanData.size()
+                && isdigit(cleanData[commaPos - 1]) && isdigit(cleanData[commaPos + 1])) {
+            cleanData[commaPos] = '.';
+        }
         size_t idx = 0;
-        const double result = std::stod(sData, &idx);
+        const double result = std::stod(cleanData, &idx);
         if (idx != sData.size()) {
             std::string unit = prune(sData.substr(idx));
             // Case-normalize the unit so KMH / Mph / KM/H all dispatch the

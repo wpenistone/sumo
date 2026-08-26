@@ -2420,12 +2420,38 @@ NIImporter_OpenStreetMap::EdgesHandler::EdgesHandler(
     mySpeedMap["RU:motorway"] = 110. / 3.6;
     const double seventy = StringUtils::parseSpeed("70mph");
     const double sixty = StringUtils::parseSpeed("60mph");
+    const double thirtyMph = StringUtils::parseSpeed("30mph");
+    const double twentyMph = StringUtils::parseSpeed("20mph");
+    const double fiftyFiveMph = StringUtils::parseSpeed("55mph");
+    const double sixtyFiveMph = StringUtils::parseSpeed("65mph");
     mySpeedMap["GB:motorway"] = seventy;
     mySpeedMap["GB:nsl_dual"] = seventy;
     mySpeedMap["GB:nsl_single"] = sixty;
+    mySpeedMap["GB:urban"] = thirtyMph;
     mySpeedMap["UK:motorway"] = seventy;
     mySpeedMap["UK:nsl_dual"] = seventy;
     mySpeedMap["UK:nsl_single"] = sixty;
+    mySpeedMap["UK:urban"] = thirtyMph;
+    mySpeedMap["CH:urban"] = 50. / 3.6;
+    mySpeedMap["CH:rural"] = 80. / 3.6;
+    mySpeedMap["CH:trunk"] = 100. / 3.6;
+    mySpeedMap["CH:motorway"] = 120. / 3.6;
+    mySpeedMap["NL:urban"] = 50. / 3.6;
+    mySpeedMap["NL:rural"] = 80. / 3.6;
+    mySpeedMap["NL:trunk"] = 100. / 3.6;
+    mySpeedMap["NL:motorway"] = 100. / 3.6;
+    mySpeedMap["PL:urban"] = 50. / 3.6;
+    mySpeedMap["PL:rural"] = 90. / 3.6;
+    mySpeedMap["PL:trunk"] = 100. / 3.6;
+    mySpeedMap["PL:expressway"] = 120. / 3.6;
+    mySpeedMap["PL:motorway"] = 140. / 3.6;
+    mySpeedMap["SE:urban"] = 50. / 3.6;
+    mySpeedMap["SE:rural"] = 70. / 3.6;
+    mySpeedMap["SE:trunk"] = 90. / 3.6;
+    mySpeedMap["SE:motorway"] = 110. / 3.6;
+    mySpeedMap["US:urban"] = thirtyMph;
+    mySpeedMap["US:rural"] = fiftyFiveMph;
+    mySpeedMap["US:motorway"] = sixtyFiveMph;
     mySpeedMap["UZ:living_street"] = 30. / 3.6;
     mySpeedMap["UZ:urban"] = 70. / 3.6;
     mySpeedMap["UZ:rural"] = 100. / 3.6;
@@ -2705,6 +2731,9 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                 }
                 if (value == "yes") {
                     myCurrentEdge->mySidewalkType = (WayType)(myCurrentEdge->mySidewalkType | WAY_BACKWARD);
+                }
+                if (value == "separate") {
+                    myCurrentEdge->myExtraDisallowed |= SVC_PEDESTRIAN;
                 }
             }
             if (key == "sidewalk:right") {
@@ -3468,10 +3497,13 @@ NIImporter_OpenStreetMap::EdgesHandler::interpretSpeed(const std::string& key, s
         }
         return mySpeedMap[value];
     } else {
-        // handle symbolic names of the form DE:30 / DE:zone30
+        // handle symbolic names of the form DE:30 / DE:zone30 / DE:zone:30
         if (value.size() > 3 && value[2] == ':') {
             if (value.substr(3, 4) == "zone") {
                 value = value.substr(7);
+                if (!value.empty() && (value[0] == ':' || value[0] == '_')) {
+                    value = value.substr(1);
+                }
             } else {
                 value = value.substr(3);
             }
@@ -3505,7 +3537,7 @@ NIImporter_OpenStreetMap::EdgesHandler::interpretChangeType(const std::string& v
     result = result >> 2;
 
     if (values.size() > 1) {
-        result += 2 << 29; // mark multi-value input
+        result |= (1 << 30); // mark multi-value input
     }
     //std::cout << " way=" << myCurrentEdge->id << " value=" << value << " result=" << std::bitset<32>(result) << "\n";
     return result;

@@ -117,3 +117,54 @@ inline std::string niOSMFuzzyMatchTurnCode(const std::string& code) {
     }
     return bestMatch;
 }
+
+/// Try to repair an unknown access-tag value by Levenshtein-matching it to
+/// the canonical set. Returns the canonical value if within distance 2 (no ties).
+inline std::string niOSMFuzzyMatchAccessValue(const std::string& val) {
+    static const char* const kAccessCanonicals[] = {
+        "yes", "no", "private", "permissive", "destination", "customers",
+        "delivery", "designated", "agricultural", "forestry", "emergency"
+    };
+    int bestDistance = 3;
+    std::string bestMatch;
+    bool tied = false;
+    for (const char* const c : kAccessCanonicals) {
+        const int d = niOSMLevenshteinDistance(val, c);
+        if (d < bestDistance) {
+            bestDistance = d;
+            bestMatch = c;
+            tied = false;
+        } else if (d == bestDistance) {
+            tied = true;
+        }
+    }
+    if (bestDistance > 2 || tied) {
+        return "";
+    }
+    return bestMatch;
+}
+
+/// Try to repair an unknown oneway-tag value by Levenshtein-matching it to
+/// the canonical set. Returns the canonical value if within distance 2 (no ties).
+inline std::string niOSMFuzzyMatchOnewayValue(const std::string& val) {
+    static const char* const kOnewayCanonicals[] = {
+        "yes", "no", "1", "0", "-1", "reverse", "alternating", "reversible", "true", "false"
+    };
+    int bestDistance = 3;
+    std::string bestMatch;
+    bool tied = false;
+    for (const char* const c : kOnewayCanonicals) {
+        const int d = niOSMLevenshteinDistance(val, c);
+        if (d < bestDistance) {
+            bestDistance = d;
+            bestMatch = c;
+            tied = false;
+        } else if (d == bestDistance) {
+            tied = true;
+        }
+    }
+    if (bestDistance > 2 || tied) {
+        return "";
+    }
+    return bestMatch;
+}
