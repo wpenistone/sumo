@@ -675,7 +675,7 @@ StringUtils::parseSpeed(const std::string& sData, const bool defaultKmph) {
             if (unit == "mph") {
                 return result * KM_PER_MILE / 3.6;
             }
-            if (unit == "knots" || unit == "knot" || unit == "kts") {
+            if (unit == "knots" || unit == "knot" || unit == "kts" || unit == "kt") {
                 return result * 1.852 / 3.6;
             }
             throw NumberFormatException("(speed format) " + sData);

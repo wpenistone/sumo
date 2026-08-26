@@ -1913,10 +1913,14 @@ std::string describeWitnesses(const std::vector<NIOSMEvidence<T>>& witnesses) {
 bool isLikelyIsoDate(const std::string& d) {
     if (d.size() == 4 || d.size() == 7 || d.size() == 10) {
         for (size_t i = 0; i < d.size(); ++i) {
-            const bool isDash = (i == 4 || i == 7) && d[i] == '-';
-            const bool isDigit = d[i] >= '0' && d[i] <= '9';
-            if (!isDash && !isDigit) {
-                return false;
+            if (i == 4 || i == 7) {
+                if (d[i] != '-') {
+                    return false;
+                }
+            } else {
+                if (d[i] < '0' || d[i] > '9') {
+                    return false;
+                }
             }
         }
         return true;
@@ -1969,13 +1973,15 @@ DateStatus checkDateWindow(const EdgeT* e, const std::string& simulatedDate) {
     if (e->myStartDate.empty() && e->myEndDate.empty()) {
         return DateStatus::NotConfigured;
     }
+    const std::string normSimDateEarliest = padIsoDateEarliest(simulatedDate);
+    const std::string normSimDateLatest = padIsoDateLatest(simulatedDate);
     if (!e->myStartDate.empty()) {
         if (!isLikelyIsoDate(e->myStartDate)) {
             WRITE_WARNINGF(TL("Edge '%' has unparseable start_date=%; skipping date filter for this way."),
                            toString(e->id), e->myStartDate);
             return DateStatus::NotConfigured;
         }
-        if (simulatedDate < padIsoDateEarliest(e->myStartDate)) {
+        if (normSimDateLatest < padIsoDateEarliest(e->myStartDate)) {
             return DateStatus::OutOfRange;
         }
     }
@@ -1985,7 +1991,7 @@ DateStatus checkDateWindow(const EdgeT* e, const std::string& simulatedDate) {
                            toString(e->id), e->myEndDate);
             return DateStatus::NotConfigured;
         }
-        if (simulatedDate > padIsoDateLatest(e->myEndDate)) {
+        if (normSimDateEarliest > padIsoDateLatest(e->myEndDate)) {
             return DateStatus::OutOfRange;
         }
     }
@@ -2903,13 +2909,15 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                     widthLanes.push_back(parsedWidth);
                 }
 
-                if (key == "width:lanes" || key == "width:lanes:forward") {
-                    myCurrentEdge->myWidthLanesForward = widthLanes;
-                    myCurrentEdge->evidence.lanesForward.emplace_back(
-                        (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
-                } else if (key == "width:lanes:backward") {
+                const bool reverseOneway = (myCurrentEdge->myIsOneWay == "-1"
+                                            || myCurrentEdge->myIsOneWay == "reverse");
+                if (key == "width:lanes:backward" || (key == "width:lanes" && reverseOneway)) {
                     myCurrentEdge->myWidthLanesBackward = widthLanes;
                     myCurrentEdge->evidence.lanesBackward.emplace_back(
+                        (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+                } else {
+                    myCurrentEdge->myWidthLanesForward = widthLanes;
+                    myCurrentEdge->evidence.lanesForward.emplace_back(
                         (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
                 } else {
                     WRITE_WARNINGF(TL("Using default lane width for edge '%' as key '%' could not be parsed."), toString(myCurrentEdge->id), key);
@@ -3011,9 +3019,10 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "lanes:forward") {
             try {
                 const int numLanes = StringUtils::toInt(value);
+                const int bothWays = myCurrentEdge->evidence.lanesBothWays.empty() ? 0 : myCurrentEdge->evidence.lanesBothWays.back().value;
                 if (myCurrentEdge->myNoLanesBackwardExplicit > 0 && myCurrentEdge->myNoLanes < 0) {
                     // fix lane count in case only lanes:forward and lanes:backward are set
-                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesBackwardExplicit;
+                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesBackwardExplicit + bothWays;
                 }
                 myCurrentEdge->myNoLanesForwardExplicit = numLanes;
                 myCurrentEdge->evidence.lanesForward.emplace_back(
@@ -3024,9 +3033,10 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "lanes:backward") {
             try {
                 const int numLanes = StringUtils::toInt(value);
+                const int bothWays = myCurrentEdge->evidence.lanesBothWays.empty() ? 0 : myCurrentEdge->evidence.lanesBothWays.back().value;
                 if (myCurrentEdge->myNoLanesForwardExplicit > 0 && myCurrentEdge->myNoLanes < 0) {
                     // fix lane count in case only lanes:forward and lanes:backward are set
-                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesForwardExplicit;
+                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesForwardExplicit + bothWays;
                 }
                 myCurrentEdge->myNoLanesBackwardExplicit = numLanes;
                 myCurrentEdge->evidence.lanesBackward.emplace_back(
@@ -3045,6 +3055,9 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                 myCurrentEdge->evidence.lanesBothWays.emplace_back(
                     numLanes, "lanes:both_ways", NIOSMConfidence::HIGH);
                 myCurrentEdge->setParameter("lanes:both_ways", value);
+                if (myCurrentEdge->myNoLanesForwardExplicit > 0 && myCurrentEdge->myNoLanesBackwardExplicit > 0 && myCurrentEdge->myNoLanes < 0) {
+                    myCurrentEdge->myNoLanes = myCurrentEdge->myNoLanesForwardExplicit + myCurrentEdge->myNoLanesBackwardExplicit + numLanes;
+                }
             } catch (...) {
                 WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
             }
@@ -3080,7 +3093,9 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                     }
                 }
             }
-            if (key == "maxspeed:lanes:backward") {
+            const bool reverseOneway = (myCurrentEdge->myIsOneWay == "-1"
+                                        || myCurrentEdge->myIsOneWay == "reverse");
+            if (key == "maxspeed:lanes:backward" || (key == "maxspeed:lanes" && reverseOneway)) {
                 myCurrentEdge->mySpeedLanesBackward = perLane;
                 myCurrentEdge->evidence.lanesBackward.emplace_back(
                     (int)perLane.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
@@ -3298,11 +3313,15 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
             int shift = 0;
             // use the first 8 bit to encode permitted directions for all classes
             // and the successive 8 bit blocks for selected classes
-            if (StringUtils::startsWith(key, "turn:bus") || StringUtils::startsWith(key, "turn:psv:")) {
+            if (StringUtils::startsWith(key, "turn:bus") || StringUtils::startsWith(key, "turn:psv")
+                    || key.find(":bus:") != std::string::npos || key.find(":psv:") != std::string::npos
+                    || StringUtils::endsWith(key, ":bus") || StringUtils::endsWith(key, ":psv")) {
                 shift = NBEdge::TURN_SIGN_SHIFT_BUS;
-            } else if (StringUtils::startsWith(key, "turn:taxi")) {
+            } else if (StringUtils::startsWith(key, "turn:taxi") || key.find(":taxi:") != std::string::npos
+                       || StringUtils::endsWith(key, ":taxi")) {
                 shift = NBEdge::TURN_SIGN_SHIFT_TAXI;
-            } else if (StringUtils::startsWith(key, "turn:bicycle")) {
+            } else if (StringUtils::startsWith(key, "turn:bicycle") || key.find(":bicycle:") != std::string::npos
+                       || StringUtils::endsWith(key, ":bicycle")) {
                 shift = NBEdge::TURN_SIGN_SHIFT_BICYCLE;
             }
             const std::vector<std::string> values = StringTokenizer(value, "|").getVector();
@@ -3537,8 +3556,13 @@ NIImporter_OpenStreetMap::EdgesHandler::interpretLaneUse(const std::string& valu
     allowed.resize(MAX2(allowed.size(), values.size()), SVC_IGNORING);
     disallowed.resize(MAX2(disallowed.size(), values.size()), SVC_IGNORING);
     int i = 0;
-    for (const std::string& val : values) {
-        if (val == "yes" || val == "permissive") {
+    for (const std::string& rawVal : values) {
+        std::string val = StringUtils::prune(rawVal);
+        std::transform(val.begin(), val.end(), val.begin(),
+                       [](unsigned char c) { return (char)std::tolower(c); });
+        if (val.empty() || val == "none" || val == "default") {
+            // Unspecified / default lane slot, keep edge default
+        } else if (val == "yes" || val == "permissive") {
             allowed[i] |= svc;
         } else if (val == "lane" || val == "designated") {
             allowed[i] |= svc;
@@ -4073,11 +4097,12 @@ NIImporter_OpenStreetMap::RelationHandler::applyRestriction() const {
                            toString(1 + (int)myExtraViaNodes.size()),
                            toString(anchorNode));
         }
-        NBNode* viaNode = myOSMNodes.find(anchorNode)->second->node;
-        if (viaNode == nullptr) {
+        auto viaIt = myOSMNodes.find(anchorNode);
+        if (viaIt == myOSMNodes.end() || viaIt->second == nullptr || viaIt->second->node == nullptr) {
             WRITE_WARNINGF(TL("Via-node '%' was not instantiated"), toString(anchorNode));
             return false;
         }
+        NBNode* viaNode = viaIt->second->node;
         // For multi-via-node, look up the from-edge at the FIRST via-node
         // (where from-way ends) and to-edge at the LAST (anchor) via-node.
         // For single-via, both lookups happen at the same node.
@@ -4219,8 +4244,10 @@ NIImporter_OpenStreetMap::RelationHandler::findEdgeRef(long long int wayRef,
     NBEdge* result = nullptr;
     int found = 0;
     for (auto candidate : candidates) {
-        if ((candidate->getID().substr(0, prefix.size()) == prefix) ||
-                (candidate->getID().substr(0, backPrefix.size()) == backPrefix)) {
+        const std::string& cid = candidate->getID();
+        const bool matchFwd = (cid == prefix) || (cid.size() > prefix.size() && cid.compare(0, prefix.size(), prefix) == 0 && cid[prefix.size()] == '#');
+        const bool matchBwd = (cid == backPrefix) || (cid.size() > backPrefix.size() && cid.compare(0, backPrefix.size(), backPrefix) == 0 && cid[backPrefix.size()] == '#');
+        if (matchFwd || matchBwd) {
             result = candidate;
             found++;
         }
