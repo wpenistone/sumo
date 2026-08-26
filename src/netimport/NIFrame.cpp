@@ -238,6 +238,15 @@ NIFrame::fillOptions(OptionsCont& oc, bool forNetedit) {
     oc.doRegister("osm.annotate-defaults", new Option_Bool(false));
     oc.addDescription("osm.annotate-defaults", "Formats", TL("Whether edges shoulds carry information on the usage of typemap defaults"));
 
+    oc.doRegister("osm.repair", new Option_String("off"));
+    oc.addDescription("osm.repair", "Formats", TL("Cross-tag reconciliation level for OSM import [off|warn|infer|aggressive]. 'warn' surfaces tag-evidence conflicts as warnings without changing behaviour; higher levels enable inference and auto-repair (not yet implemented)"));
+
+    oc.doRegister("osm.lifecycle", new Option_String("warn"));
+    oc.addDescription("osm.lifecycle", "Formats", TL("Policy for lifecycle-prefixed ways (construction:highway, disused:highway, proposed:highway, abandoned:highway, razed:highway, was:highway, planned:highway, demolished:highway, removed:highway) [discard|include|warn]. 'warn' (default) drops the way and emits a warning. 'discard' drops the way silently. 'include' keeps the way as if the prefix were absent."));
+
+    oc.doRegister("osm.date", new Option_String(""));
+    oc.addDescription("osm.date", "Formats", TL("Simulated date in ISO YYYY-MM-DD format. When set, ways whose OSM start_date/end_date tags are outside the date are dropped, and lifecycle-prefixed ways (construction:, proposed:, etc.) are included when the date falls within their [start_date, end_date] window."));
+
     // register matsim options
     oc.doRegister("matsim.keep-length", new Option_Bool(false));
     oc.addDescription("matsim.keep-length", "Formats", TL("The edge lengths given in the MATSim-file will be kept"));
@@ -386,6 +395,9 @@ NIFrame::fillOptions(OptionsCont& oc, bool forNetedit) {
 
     oc.doRegister("tls.discard-simple", new Option_Bool(false));
     oc.addDescription("tls.discard-simple", "TLS Building", "Does not instantiate traffic lights at geometry-like nodes loaded from other formats than plain-XML");
+
+    oc.doRegister("tls.discard-pedestrian-crossing", new Option_Bool(false));
+    oc.addDescription("tls.discard-pedestrian-crossing", "TLS Building", "Does not instantiate traffic lights for standalone pedestrian crossings while preserving physical crossings");
 
     // register railway options
     oc.doRegister("railway.signals.discard", new Option_Bool(false));

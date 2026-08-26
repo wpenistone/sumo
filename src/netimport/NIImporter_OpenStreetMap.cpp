@@ -48,6 +48,7 @@
 #include <netbuild/NBNode.h>
 #include <netbuild/NBNodeCont.h>
 #include <netbuild/NBNetBuilder.h>
+#include "NIOSMCanonicalValues.h"
 #include <netbuild/NBOwnTLDef.h>
 #include <netbuild/NBPTLine.h>
 #include <netbuild/NBPTLineCont.h>
@@ -83,8 +84,11 @@ public:
         if (e1->myNoLanes != e2->myNoLanes) {
             return e1->myNoLanes > e2->myNoLanes;
         }
-        if (e1->myNoLanesForward != e2->myNoLanesForward) {
-            return e1->myNoLanesForward > e2->myNoLanesForward;
+        if (e1->myNoLanesForwardExplicit != e2->myNoLanesForwardExplicit) {
+            return e1->myNoLanesForwardExplicit > e2->myNoLanesForwardExplicit;
+        }
+        if (e1->myNoLanesBackwardExplicit != e2->myNoLanesBackwardExplicit) {
+            return e1->myNoLanesBackwardExplicit > e2->myNoLanesBackwardExplicit;
         }
         if (e1->myMaxSpeed != e2->myMaxSpeed) {
             return e1->myMaxSpeed > e2->myMaxSpeed;
@@ -435,6 +439,7 @@ NIImporter_OpenStreetMap::insertNodeChecking(long long int id, NBNodeCont& nc, N
         n->node = node;
         if (n->railwayCrossing) {
             if (n->getParameter("crossing:barrier", "no") != "no"
+                    || n->getParameter("crossing:light") == "yes"
                     || n->getParameter("crossing.light") == "yes"
                     || n->tlsControlled) {
                 node->reinit(pos, SumoXMLNodeType::RAIL_CROSSING);
@@ -520,10 +525,14 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
     SVCPermissions extra = myImportBikeAccess ? e->myExtraAllowed : (e->myExtraAllowed & ~SVC_BICYCLE);
     const SVCPermissions extraDis = myImportBikeAccess ? e->myExtraDisallowed : (e->myExtraDisallowed & ~SVC_BICYCLE);
     std::vector<SumoXMLAttr> defaults;
-    // extra permissions are more specific than extra prohibitions except for buses (which come from the less specific psv tag)
-    if ((extraDis & SVC_BUS) && (extra & SVC_BUS)) {
-        extra = extra & ~SVC_BUS;
-    }
+    // Conflict resolution: when a class is both allowed and disallowed,
+    // explicit per-mode allows (bus=yes, taxi=yes, hgv=yes, etc., tracked
+    // in myExplicitlyAllowed) win unconditionally. Implicit allows (e.g.
+    // psv=yes incidentally permitting SVC_BUS, or motor_vehicle=yes
+    // incidentally permitting SVC_TRUCK while a separate hgv=no disallows
+    // it) lose to the disallow.
+    const SVCPermissions implicitConflict = extra & extraDis & ~e->myExplicitlyAllowed;
+    extra &= ~implicitConflict;
     SVCPermissions permissions = (defaultPermissions & ~extraDis) | extra;
     if (!myImportBikeAccess && permissions == (SVC_PEDESTRIAN | SVC_BICYCLE)
             && (e->myExtraDisallowed & SVC_BICYCLE) != 0
@@ -674,57 +683,75 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
             addBackward = true;
         }
     }
+
+    // deal with busways that run in the opposite direction of a one-way street before lane allocation
+    if (!addForward && ((e->myBuswayType & WAY_FORWARD) != 0 || e->myBusLanesForwardCount > 0)) {
+        addForward = true;
+        forwardPermissions = (e->myBusLanesForwardClasses != 0) ? e->myBusLanesForwardClasses : (SVCPermissions)SVC_BUS;
+    }
+    if (!addBackward && ((e->myBuswayType & WAY_BACKWARD) != 0 || e->myBusLanesBackwardCount > 0)) {
+        addBackward = true;
+        backwardPermissions = (e->myBusLanesBackwardClasses != 0) ? e->myBusLanesBackwardClasses : (SVCPermissions)SVC_BUS;
+    }
+
     // if we had been able to extract the number of lanes, override the highway type default
     if (e->myNoLanes > 0) {
         if (addForward && !addBackward) {
-            numLanesForward = e->myNoLanesForward > 0 ? e->myNoLanesForward : e->myNoLanes;
+            numLanesForward = e->myNoLanesForwardExplicit > 0 ? e->myNoLanesForwardExplicit : e->myNoLanes;
         } else if (!addForward && addBackward) {
-            numLanesBackward = e->myNoLanesForward < 0 ? -e->myNoLanesForward : e->myNoLanes;
+            numLanesBackward = e->myNoLanesBackwardExplicit > 0 ? e->myNoLanesBackwardExplicit : e->myNoLanes;
         } else {
-            if (e->myNoLanesForward > 0) {
-                numLanesForward = e->myNoLanesForward;
-            } else if (e->myNoLanesForward < 0) {
-                numLanesForward = e->myNoLanes + e->myNoLanesForward;
+            // Both directions present
+            if (e->myNoLanesForwardExplicit > 0 && e->myNoLanesBackwardExplicit > 0) {
+                numLanesForward = e->myNoLanesForwardExplicit;
+                numLanesBackward = e->myNoLanesBackwardExplicit;
+            } else if (e->myNoLanesForwardExplicit > 0) {
+                numLanesForward = e->myNoLanesForwardExplicit;
+                numLanesBackward = MAX2(1, e->myNoLanes - e->myNoLanesForwardExplicit);
+            } else if (e->myNoLanesBackwardExplicit > 0) {
+                numLanesBackward = e->myNoLanesBackwardExplicit;
+                numLanesForward = MAX2(1, e->myNoLanes - e->myNoLanesBackwardExplicit);
+            } else if (((e->myBuswayType & WAY_BACKWARD) != 0 || e->myBusLanesBackwardCount > 0) && (e->myBuswayType & WAY_FORWARD) == 0 && e->myBusLanesForwardCount == 0) {
+                // Contraflow backward busway: reserve bus lane(s) for backward, remainder for forward
+                numLanesBackward = e->myBusLanesBackwardCount > 0 ? e->myBusLanesBackwardCount : 1;
+                numLanesForward = MAX2(1, e->myNoLanes - numLanesBackward);
+            } else if (((e->myBuswayType & WAY_FORWARD) != 0 || e->myBusLanesForwardCount > 0) && (e->myBuswayType & WAY_BACKWARD) == 0 && e->myBusLanesBackwardCount == 0) {
+                // Contraflow forward busway: reserve bus lane(s) for forward, remainder for backward
+                numLanesForward = e->myBusLanesForwardCount > 0 ? e->myBusLanesForwardCount : 1;
+                numLanesBackward = MAX2(1, e->myNoLanes - numLanesForward);
             } else {
                 numLanesForward = (int) std::ceil(e->myNoLanes / 2.0);
+                numLanesBackward = e->myNoLanes - numLanesForward;
+                // sometimes ways are tagged according to their physical width of a single
+                // lane but they are intended for traffic in both directions
+                numLanesForward = MAX2(1, numLanesForward);
+                numLanesBackward = MAX2(1, numLanesBackward);
             }
-            numLanesBackward = e->myNoLanes - numLanesForward;
-            // sometimes ways are tagged according to their physical width of a single
-            // lane but they are intended for traffic in both directions
-            numLanesForward = MAX2(1, numLanesForward);
-            numLanesBackward = MAX2(1, numLanesBackward);
         }
     } else if (e->myNoLanes == 0) {
         WRITE_WARNINGF(TL("Skipping edge '%' because it has zero lanes."), id);
         return newIndex;
     } else {
         // the total number of lanes is not known but at least one direction
-        if (e->myNoLanesForward > 0) {
-            numLanesForward = e->myNoLanesForward;
-        } else if ((e->myBuswayType & WAY_FORWARD) != 0 && (extraDis & SVC_PASSENGER) == 0) {
-            // if we have a busway lane, yet cars may drive this implies at least two lanes
-            numLanesForward = MAX2(numLanesForward, 2);
+        if (e->myNoLanesForwardExplicit > 0) {
+            numLanesForward = e->myNoLanesForwardExplicit;
+        } else if (((e->myBuswayType & WAY_FORWARD) != 0 || e->myBusLanesForwardCount > 0) && (extraDis & SVC_PASSENGER) == 0) {
+            // if we have a bus/PSV lane yet cars may drive, this implies at least 1 general lane + N bus lanes
+            numLanesForward = MAX2(numLanesForward, MAX2(2, e->myBusLanesForwardCount + 1));
+        } else if ((e->myBuswayType & WAY_FORWARD) != 0 || e->myBusLanesForwardCount > 0) {
+            numLanesForward = MAX2(numLanesForward, MAX2(1, e->myBusLanesForwardCount));
         }
-        if (e->myNoLanesForward < 0) {
-            numLanesBackward = -e->myNoLanesForward;
-        } else if ((e->myBuswayType & WAY_BACKWARD) != 0 && (extraDis & SVC_PASSENGER) == 0) {
-            // if we have a busway lane, yet cars may drive this implies at least two lanes
-            numLanesBackward = MAX2(numLanesForward, 2);
+        if (e->myNoLanesBackwardExplicit > 0) {
+            numLanesBackward = e->myNoLanesBackwardExplicit;
+        } else if (((e->myBuswayType & WAY_BACKWARD) != 0 || e->myBusLanesBackwardCount > 0) && (extraDis & SVC_PASSENGER) == 0) {
+            // if we have a bus/PSV lane yet cars may drive, this implies at least 1 general lane + N bus lanes
+            numLanesBackward = MAX2(numLanesBackward, MAX2(2, e->myBusLanesBackwardCount + 1));
+        } else if ((e->myBuswayType & WAY_BACKWARD) != 0 || e->myBusLanesBackwardCount > 0) {
+            numLanesBackward = MAX2(numLanesBackward, MAX2(1, e->myBusLanesBackwardCount));
         }
-        if (myAnnotateDefaults && e->myNoLanesForward == 0) {
+        if (myAnnotateDefaults && e->myNoLanesForwardExplicit == 0 && e->myNoLanesBackwardExplicit == 0) {
             defaults.push_back(SUMO_ATTR_NUMLANES);
         }
-    }
-    // deal with busways that run in the opposite direction of a one-way street
-    if (!addForward && (e->myBuswayType & WAY_FORWARD) != 0) {
-        addForward = true;
-        forwardPermissions = SVC_BUS;
-        numLanesForward = 1;
-    }
-    if (!addBackward && (e->myBuswayType & WAY_BACKWARD) != 0) {
-        addBackward = true;
-        backwardPermissions = SVC_BUS;
-        numLanesBackward = 1;
     }
     // width is meant for raw lane count before adding sidewalks or cycleways
     const int taggedLanes = (addForward ? numLanesForward : 0) + (addBackward ? numLanesBackward : 0);
@@ -750,17 +777,33 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
         WRITE_WARNINGF(TL("Skipping edge '%' because it has speed %."), id, speed);
         return newIndex;
     }
+    // When an OSM way has lanes=1 on a bidirectional carriageway, it
+    // represents a single shared physical strip, not two parallel narrow
+    // lanes. Under --osm.repair=infer (or aggressive), emit a proper
+    // SUMO bidi edge pair (spreadType=center + setBidi(true)). Under
+    // default (off/warn), retain the legacy half-width behaviour so
+    // existing test fixtures' golden output is unchanged.
+    bool bidiPair = false;
     if (e->myNoLanes == 1 && addForward && addBackward) {
-        // narrow road which now receives a total of 2 lanes but has less capacity than implied
-        if (e->myWidth < 0 && e->myWidthLanesForward.size() == 0 && e->myWidthLanesBackward.size() == 0) {
-            if (forwardWidth == NBEdge::UNSPECIFIED_WIDTH) {
-                forwardWidth = SUMO_const_laneWidth;
+        const std::string repair = OptionsCont::getOptions().getString("osm.repair");
+        if (repair == "infer" || repair == "aggressive") {
+            bidiPair = true;
+            // Do not halve the widths; both edges will overlap geometrically
+            // because spreadType=center, and the bidi flag tells SUMO that
+            // only one direction can use the strip at a time.
+        } else {
+            // Legacy behaviour: two parallel half-width lanes. Wrong on both
+            // geometry and capacity, but preserved for backward compatibility.
+            if (e->myWidth < 0 && e->myWidthLanesForward.size() == 0 && e->myWidthLanesBackward.size() == 0) {
+                if (forwardWidth == NBEdge::UNSPECIFIED_WIDTH) {
+                    forwardWidth = SUMO_const_laneWidth;
+                }
+                if (backwardWidth == NBEdge::UNSPECIFIED_WIDTH) {
+                    backwardWidth = SUMO_const_laneWidth;
+                }
+                forwardWidth /= 2;
+                backwardWidth /= 2;
             }
-            if (backwardWidth == NBEdge::UNSPECIFIED_WIDTH) {
-                backwardWidth = SUMO_const_laneWidth;
-            }
-            forwardWidth /= 2;
-            backwardWidth /= 2;
         }
         if (e->myWidth < 5) {
             routingType = "narrow";
@@ -910,6 +953,11 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
         // placement references the directional edge centerline for one-way edges
         lsf = LaneSpreadFunction::CENTER;
     }
+    if (bidiPair) {
+        // Both edges of a bidi pair share the same geometry, drawn centred
+        // on the way reference line.
+        lsf = LaneSpreadFunction::CENTER;
+    }
     if (defaults.size() > 0) {
         e->setParameter("osmDefaults", joinToString(defaults, " "));
     }
@@ -958,22 +1006,40 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
 
         // process forward lanes width
         const int numForwardLanesFromWidthKey = (int)e->myWidthLanesForward.size();
+        const int numForwardLanes = (int)nbe->getLanes().size();
         if (numForwardLanesFromWidthKey > 0 && !OptionsCont::getOptions().getBool("ignore-widths")) {
-            if ((int)nbe->getLanes().size() != numForwardLanesFromWidthKey) {
-                WRITE_WARNINGF(TL("Forward lanes count for edge '%' ('%') is not matching the number of lanes defined in width:lanes:forward key ('%'). Using default width values."),
-                               id, nbe->getLanes().size(), numForwardLanesFromWidthKey);
-            } else {
-                for (int i = 0; i < numForwardLanesFromWidthKey; i++) {
-                    const double actualWidth = e->myWidthLanesForward[i] <= 0 ? forwardWidth : e->myWidthLanesForward[i];
-                    const int laneIndex = lefthand ? i : numForwardLanesFromWidthKey - i - 1;
-                    nbe->setLaneWidth(laneIndex, actualWidth);
-                }
+            if (numForwardLanes != numForwardLanesFromWidthKey) {
+                // Apply the entries we have; remaining lanes use the default.
+                WRITE_WARNINGF(TL("Forward lanes count for edge '%' (%) does not match the number of lanes in width:lanes:forward (%). Applying widths to the first % lanes; remaining lanes use the default."),
+                               id, toString(numForwardLanes), toString(numForwardLanesFromWidthKey),
+                               toString(MIN2(numForwardLanes, numForwardLanesFromWidthKey)));
+            }
+            const int numToApply = MIN2(numForwardLanes, numForwardLanesFromWidthKey);
+            for (int i = 0; i < numToApply; i++) {
+                const double actualWidth = e->myWidthLanesForward[i] <= 0 ? forwardWidth : e->myWidthLanesForward[i];
+                const int laneIndex = lefthand ? i : numForwardLanes - i - 1;
+                nbe->setLaneWidth(laneIndex, actualWidth);
             }
         }
         if ((e->myRailDirection & WAY_PREFER_FORWARD) != 0 && isRailway(forwardPermissions)) {
             nbe->setRoutingType("4");
         } else {
             nbe->setRoutingType(routingType);
+        }
+        if (bidiPair) {
+            nbe->setBidi(true);
+        }
+        // Apply per-lane maxspeed overrides for the forward direction.
+        if (!e->mySpeedLanesForward.empty()) {
+            const int numForwardLanes = (int)nbe->getLanes().size();
+            const int numToApply = MIN2(numForwardLanes, (int)e->mySpeedLanesForward.size());
+            for (int i = 0; i < numToApply; i++) {
+                const double laneSpeed = e->mySpeedLanesForward[i];
+                if (laneSpeed != MAXSPEED_UNGIVEN && laneSpeed > 0) {
+                    const int laneIndex = lefthand ? i : numForwardLanes - i - 1;
+                    nbe->setSpeed(laneIndex, laneSpeed);
+                }
+            }
         }
 
         if (!ec.insert(nbe)) {
@@ -1016,22 +1082,40 @@ NIImporter_OpenStreetMap::insertEdge(Edge* e, int index, NBNode* from, NBNode* t
         }
         // process backward lanes width
         const int numBackwardLanesFromWidthKey = (int)e->myWidthLanesBackward.size();
+        const int numBackwardLanes = (int)nbe->getLanes().size();
         if (numBackwardLanesFromWidthKey > 0 && !OptionsCont::getOptions().getBool("ignore-widths")) {
-            if ((int)nbe->getLanes().size() != numBackwardLanesFromWidthKey) {
-                WRITE_WARNINGF(TL("Backward lanes count for edge '%' ('%') is not matching the number of lanes defined in width:lanes:backward key ('%'). Using default width values."),
-                               id, nbe->getLanes().size(), numBackwardLanesFromWidthKey);
-            } else {
-                for (int i = 0; i < numBackwardLanesFromWidthKey; i++) {
-                    const double actualWidth = e->myWidthLanesBackward[i] <= 0 ? backwardWidth : e->myWidthLanesBackward[i];
-                    const int laneIndex = lefthand ? i : numBackwardLanesFromWidthKey - i - 1;
-                    nbe->setLaneWidth(laneIndex, actualWidth);
-                }
+            if (numBackwardLanes != numBackwardLanesFromWidthKey) {
+                // Apply the entries we have; remaining lanes use the default.
+                WRITE_WARNINGF(TL("Backward lanes count for edge '%' (%) does not match the number of lanes in width:lanes:backward (%). Applying widths to the first % lanes; remaining lanes use the default."),
+                               id, toString(numBackwardLanes), toString(numBackwardLanesFromWidthKey),
+                               toString(MIN2(numBackwardLanes, numBackwardLanesFromWidthKey)));
+            }
+            const int numToApply = MIN2(numBackwardLanes, numBackwardLanesFromWidthKey);
+            for (int i = 0; i < numToApply; i++) {
+                const double actualWidth = e->myWidthLanesBackward[i] <= 0 ? backwardWidth : e->myWidthLanesBackward[i];
+                const int laneIndex = lefthand ? i : numBackwardLanes - i - 1;
+                nbe->setLaneWidth(laneIndex, actualWidth);
             }
         }
         if ((e->myRailDirection & WAY_PREFER_BACKWARD) != 0 && isRailway(backwardPermissions)) {
             nbe->setRoutingType("4");
         } else {
             nbe->setRoutingType(routingType);
+        }
+        if (bidiPair) {
+            nbe->setBidi(true);
+        }
+        // Apply per-lane maxspeed overrides for the backward direction.
+        if (!e->mySpeedLanesBackward.empty()) {
+            const int numBackwardLanes = (int)nbe->getLanes().size();
+            const int numToApply = MIN2(numBackwardLanes, (int)e->mySpeedLanesBackward.size());
+            for (int i = 0; i < numToApply; i++) {
+                const double laneSpeed = e->mySpeedLanesBackward[i];
+                if (laneSpeed != MAXSPEED_UNGIVEN && laneSpeed > 0) {
+                    const int laneIndex = lefthand ? i : numBackwardLanes - i - 1;
+                    nbe->setSpeed(laneIndex, laneSpeed);
+                }
+            }
         }
 
         if (!ec.insert(nbe)) {
@@ -1524,26 +1608,42 @@ NIImporter_OpenStreetMap::applyChangeProhibition(NBEdge* e, int changeProhibitio
 
 void
 NIImporter_OpenStreetMap::applyLaneUse(NBEdge* e, NIImporter_OpenStreetMap::Edge* nie, const bool forward) {
-    if (myImportLaneAccess) {
-        const int numLanes = e->getNumLanes();
-        const bool lefthand = OptionsCont::getOptions().getBool("lefthand");
-        const std::vector<bool>& designated = forward ? nie->myDesignatedLaneForward : nie->myDesignatedLaneBackward;
-        const std::vector<SVCPermissions>& allowed = forward ? nie->myAllowedLaneForward : nie->myAllowedLaneBackward;
-        const std::vector<SVCPermissions>& disallowed = forward ? nie->myDisallowedLaneForward : nie->myDisallowedLaneBackward;
-        for (int lane = 0; lane < numLanes; lane++) {
-            // laneUse stores from left to right
-            const int i = lefthand ? lane : numLanes - 1 - lane;
-            // Extra allowed SVCs for this lane or none if no info was present for the lane
-            const SVCPermissions extraAllowed = i < (int)allowed.size() ? allowed[i] : (SVCPermissions)SVC_IGNORING;
-            // Extra disallowed SVCs for this lane or none if no info was present for the lane
-            const SVCPermissions extraDisallowed = i < (int)disallowed.size() ? disallowed[i] : (SVCPermissions)SVC_IGNORING;
-            if (i < (int)designated.size() && designated[i]) {
-                // if designated, delete all permissions
-                e->setPermissions(SVC_IGNORING, lane);
-                e->preferVehicleClass(lane, extraAllowed);
-            }
-            e->setPermissions((e->getPermissions(lane) | extraAllowed) & (~extraDisallowed), lane);
+    const std::vector<bool>& designated = forward ? nie->myDesignatedLaneForward : nie->myDesignatedLaneBackward;
+    const std::vector<SVCPermissions>& allowed = forward ? nie->myAllowedLaneForward : nie->myAllowedLaneBackward;
+    const std::vector<SVCPermissions>& disallowed = forward ? nie->myDisallowedLaneForward : nie->myDisallowedLaneBackward;
+    if (!myImportLaneAccess) {
+        // Surface a warning instead of silently discarding hand-tagged
+        // per-lane access data when the global flag is off. Forward-only
+        // so two-way edges don't emit the warning twice.
+        if (forward && (!designated.empty() || !allowed.empty() || !disallowed.empty())) {
+            WRITE_WARNINGF(TL("Per-lane access tags on edge '%' were parsed but ignored because --osm.lane-access is not set; pass --osm.lane-access to honour them."),
+                           e->getID());
         }
+        return;
+    }
+    const int numLanes = e->getNumLanes();
+    const bool lefthand = OptionsCont::getOptions().getBool("lefthand");
+    const int busCount = forward ? nie->myBusLanesForwardCount : nie->myBusLanesBackwardCount;
+    const SVCPermissions busClasses = forward ? nie->myBusLanesForwardClasses : nie->myBusLanesBackwardClasses;
+    if (busCount > 0 && designated.empty() && allowed.empty()) {
+        for (int lane = 0; lane < MIN2(numLanes, busCount); lane++) {
+            e->setPermissions(busClasses, lane);
+            e->preferVehicleClass(lane, busClasses);
+        }
+    }
+    for (int lane = 0; lane < numLanes; lane++) {
+        // laneUse stores from left to right
+        const int i = lefthand ? lane : numLanes - 1 - lane;
+        // Extra allowed SVCs for this lane or none if no info was present for the lane
+        const SVCPermissions extraAllowed = i < (int)allowed.size() ? allowed[i] : (SVCPermissions)SVC_IGNORING;
+        // Extra disallowed SVCs for this lane or none if no info was present for the lane
+        const SVCPermissions extraDisallowed = i < (int)disallowed.size() ? disallowed[i] : (SVCPermissions)SVC_IGNORING;
+        if (i < (int)designated.size() && designated[i]) {
+            // if designated, delete all permissions
+            e->setPermissions(SVC_IGNORING, lane);
+            e->preferVehicleClass(lane, extraAllowed);
+        }
+        e->setPermissions((e->getPermissions(lane) | extraAllowed) & (~extraDisallowed), lane);
     }
 }
 
@@ -1659,7 +1759,7 @@ NIImporter_OpenStreetMap::NodesHandler::myStartElement(int element, const SUMOSA
         bool ok = true;
         const std::string& key = attrs.get<std::string>(SUMO_ATTR_K, myLastNodeID.c_str(), ok, false);
         // we check whether the key is relevant (and we really need to transcode the value) to avoid hitting #1636
-        if (key == "highway" || key == "ele" || key == "crossing" || key == "railway" || key == "public_transport"
+        if (key == "highway" || key == "ele" || key == "crossing" || key == "traffic_signals" || key == "railway" || key == "public_transport"
                 || key == "name" || key == "train" || key == "bus" || key == "tram" || key == "light_rail" || key == "subway" || key == "station" || key == "noexit"
                 || key == "crossing:barrier"
                 || key == "crossing:light"
@@ -1668,12 +1768,27 @@ NIImporter_OpenStreetMap::NodesHandler::myStartElement(int element, const SUMOSA
                 || StringUtils::startsWith(key, "railway:position")
            ) {
             const std::string& value = attrs.get<std::string>(SUMO_ATTR_V, myLastNodeID.c_str(), ok, false);
+            const bool discardPedTls = myOptionsCont.getBool("tls.discard-pedestrian-crossing");
             if (key == "highway" && value.find("traffic_signal") != std::string::npos) {
-                myCurrentNode->tlsControlled = true;
+                if (!discardPedTls || (!myCurrentNode->pedestrianCrossing && myCurrentNode->getParameter("traffic_signals") != "pedestrian_crossing")) {
+                    myCurrentNode->tlsControlled = true;
+                }
             } else if (key == "crossing" && value.find("traffic_signals") != std::string::npos) {
-                myCurrentNode->tlsControlled = true;
+                myCurrentNode->pedestrianCrossing = true;
+                if (!discardPedTls) {
+                    myCurrentNode->tlsControlled = true;
+                }
+            } else if (key == "traffic_signals" && value == "pedestrian_crossing") {
+                myCurrentNode->pedestrianCrossing = true;
+                myCurrentNode->setParameter("traffic_signals", value);
+                if (discardPedTls) {
+                    myCurrentNode->tlsControlled = false;
+                }
             } else if (key == "highway" && value.find("crossing") != std::string::npos) {
                 myCurrentNode->pedestrianCrossing = true;
+                if (discardPedTls && myCurrentNode->getParameter("traffic_signals") == "pedestrian_crossing") {
+                    myCurrentNode->tlsControlled = false;
+                }
             } else if ((key == "noexit" && value == "yes")
                        || (key == "railway" && value == "buffer_stop")) {
                 myCurrentNode->railwayBufferStop = true;
@@ -1754,6 +1869,459 @@ NIImporter_OpenStreetMap::NodesHandler::myEndElement(int element) {
 
 
 // ---------------------------------------------------------------------------
+// OSM-tag-evidence observers
+// ---------------------------------------------------------------------------
+namespace {
+
+/// Pick the highest-confidence witness from a list. Ties: latest added wins.
+/// Returns false if the list is empty.
+template <typename T>
+bool pickHighestConfidence(const std::vector<NIOSMEvidence<T>>& witnesses,
+                           T& outValue, std::string& outSource) {
+    if (witnesses.empty()) {
+        return false;
+    }
+    auto best = witnesses.begin();
+    for (auto it = witnesses.begin() + 1; it != witnesses.end(); ++it) {
+        if (it->confidence >= best->confidence) {
+            best = it;
+        }
+    }
+    outValue = best->value;
+    outSource = best->sourceTag;
+    return true;
+}
+
+/// Format every witness in a list as "value (source)" joined by ", ".
+template <typename T>
+std::string describeWitnesses(const std::vector<NIOSMEvidence<T>>& witnesses) {
+    std::ostringstream s;
+    bool first = true;
+    for (const auto& w : witnesses) {
+        if (!first) {
+            s << ", ";
+        }
+        s << w.value << " (" << w.sourceTag << ")";
+        first = false;
+    }
+    return s.str();
+}
+
+/// Quick ISO-date well-formedness check. Accepts YYYY, YYYY-MM, or
+/// YYYY-MM-DD. Rejects anything else (fuzzy values like "summer 2026",
+/// "~2025", or open-ended ranges).
+bool isLikelyIsoDate(const std::string& d) {
+    if (d.size() == 4 || d.size() == 7 || d.size() == 10) {
+        for (size_t i = 0; i < d.size(); ++i) {
+            const bool isDash = (i == 4 || i == 7) && d[i] == '-';
+            const bool isDigit = d[i] >= '0' && d[i] <= '9';
+            if (!isDash && !isDigit) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+/// Pad an ISO date to YYYY-MM-DD form, taking the earliest interpretation
+/// for partial dates (so "2025" becomes "2025-01-01"). Used for start_date.
+std::string padIsoDateEarliest(const std::string& d) {
+    if (d.size() == 4) {
+        return d + "-01-01";
+    }
+    if (d.size() == 7) {
+        return d + "-01";
+    }
+    return d;
+}
+
+/// Pad an ISO date to YYYY-MM-DD form, taking the latest interpretation
+/// for partial dates ("2025" -> "2025-12-31"). Used for end_date.
+std::string padIsoDateLatest(const std::string& d) {
+    if (d.size() == 4) {
+        return d + "-12-31";
+    }
+    if (d.size() == 7) {
+        // overshoot slightly to "31" — fine for lexicographic compares since
+        // calendar months never extend beyond -31
+        return d + "-31";
+    }
+    return d;
+}
+
+/// Date-window status for an edge given the configured --osm.date.
+enum class DateStatus {
+    /// No --osm.date configured, or no date tags on the edge.
+    NotConfigured,
+    /// Edge's [start_date, end_date] contains the simulated date.
+    InRange,
+    /// Edge has at least one date tag and the simulated date is outside.
+    OutOfRange
+};
+
+/// Decide whether the edge falls within the configured simulated date.
+template <typename EdgeT>
+DateStatus checkDateWindow(const EdgeT* e, const std::string& simulatedDate) {
+    if (simulatedDate.empty()) {
+        return DateStatus::NotConfigured;
+    }
+    if (e->myStartDate.empty() && e->myEndDate.empty()) {
+        return DateStatus::NotConfigured;
+    }
+    if (!e->myStartDate.empty()) {
+        if (!isLikelyIsoDate(e->myStartDate)) {
+            WRITE_WARNINGF(TL("Edge '%' has unparseable start_date=%; skipping date filter for this way."),
+                           toString(e->id), e->myStartDate);
+            return DateStatus::NotConfigured;
+        }
+        if (simulatedDate < padIsoDateEarliest(e->myStartDate)) {
+            return DateStatus::OutOfRange;
+        }
+    }
+    if (!e->myEndDate.empty()) {
+        if (!isLikelyIsoDate(e->myEndDate)) {
+            WRITE_WARNINGF(TL("Edge '%' has unparseable end_date=%; skipping date filter for this way."),
+                           toString(e->id), e->myEndDate);
+            return DateStatus::NotConfigured;
+        }
+        if (simulatedDate > padIsoDateLatest(e->myEndDate)) {
+            return DateStatus::OutOfRange;
+        }
+    }
+    return DateStatus::InRange;
+}
+
+/// Interpret an OSM oneway-tag value string. Returns true for the values
+/// that mean "this way carries traffic in only one direction"
+/// (yes/true/1/-1/reverse), false for bidirectional values
+/// (no/false/0/empty), and falls back to false for anything unrecognized.
+bool isOnewayValue(const std::string& v) {
+    return v == "yes" || v == "true" || v == "1"
+        || v == "-1" || v == "reverse";
+}
+
+/// Lane-count-balance observer. Checks that the highest-confidence witnesses
+/// for lanesTotal, lanesForward, lanesBackward and lanesBothWays satisfy the
+/// conservation law:
+///     lanesTotal = lanesForward + lanesBackward + lanesBothWays
+/// Emits a warning when (a) at least three of the four are witnessed, AND
+/// (b) the sum disagrees with the witnessed total. Pure observation: does
+/// not modify the resolved Edge fields.
+///
+/// Templated on the edge type so the helper can live at file scope without
+/// naming NIImporter_OpenStreetMap::Edge (which is protected).
+template <typename EdgeT>
+void checkLaneCountBalance(const EdgeT* e) {
+    int total = -1, forward = -1, backward = -1, bothWays = 0;
+    std::string totalSrc, forwardSrc, backwardSrc, bothWaysSrc;
+    const bool hasTotal    = pickHighestConfidence(e->evidence.lanesTotal,    total,    totalSrc);
+    const bool hasForward  = pickHighestConfidence(e->evidence.lanesForward,  forward,  forwardSrc);
+    const bool hasBackward = pickHighestConfidence(e->evidence.lanesBackward, backward, backwardSrc);
+    const bool hasBothWays = pickHighestConfidence(e->evidence.lanesBothWays, bothWays, bothWaysSrc);
+
+    // Need a total and at least one direction (or both_ways) to detect imbalance.
+    if (!hasTotal || (!hasForward && !hasBackward && !hasBothWays)) {
+        return;
+    }
+    // Need both directions or directions + both_ways to compute a sum.
+    if (!hasForward || !hasBackward) {
+        return;
+    }
+
+    const int sum = forward + backward + (hasBothWays ? bothWays : 0);
+    if (sum != total) {
+        std::ostringstream msg;
+        msg << "Lane-count witnesses inconsistent for edge '" << e->id
+            << "': total=" << total << " (from " << totalSrc << ")"
+            << " but forward+backward" << (hasBothWays ? "+both_ways" : "") << "=" << sum
+            << " (forward=" << forward << " from " << forwardSrc
+            << ", backward=" << backward << " from " << backwardSrc;
+        if (hasBothWays) {
+            msg << ", both_ways=" << bothWays << " from " << bothWaysSrc;
+        }
+        msg << "). Resolved Edge fields unchanged.";
+        WRITE_WARNING(msg.str());
+    }
+}
+
+/// Two values are considered "in agreement" if they're equal. For doubles we
+/// allow a small tolerance to avoid float-equality brittleness on values that
+/// pass through unit conversion (e.g. 50 km/h vs 13.8889 m/s after rounding).
+inline bool witnessValuesAgree(int a, int b) {
+    return a == b;
+}
+inline bool witnessValuesAgree(double a, double b) {
+    return std::abs(a - b) <= 0.01; // 1 cm/s for speed; trivial for widths
+}
+
+/// Witness-agreement check for any value type. When the list has at least
+/// two witnesses that disagree, emit a warning naming every distinct value
+/// and its source tag. Pure observation.
+template <typename T, typename EdgeT>
+void checkWitnessAgreement(const std::vector<NIOSMEvidence<T>>& witnesses,
+                           const std::string& attrName,
+                           const EdgeT* e) {
+    if (witnesses.size() < 2) {
+        return;
+    }
+    const T& firstValue = witnesses.front().value;
+    bool allAgree = true;
+    for (const auto& w : witnesses) {
+        if (!witnessValuesAgree(w.value, firstValue)) {
+            allAgree = false;
+            break;
+        }
+    }
+    if (allAgree) {
+        return;
+    }
+    std::ostringstream msg;
+    msg << "Disagreeing " << attrName << " witnesses for edge '" << e->id << "':";
+    for (const auto& w : witnesses) {
+        msg << " " << w.value << " (" << w.sourceTag << ")";
+    }
+    msg << ". Resolved Edge fields unchanged.";
+    WRITE_WARNING(msg.str());
+}
+
+/// Lane-count plausibility warnings. Surfaces likely OSM tagging errors that
+/// today are silently accepted: huge lane counts on small road types, or a
+/// single lane on a motorway. Pure observation.
+template <typename EdgeT>
+void checkLaneCountPlausibility(const EdgeT* e) {
+    int total = -1;
+    std::string totalSrc;
+    if (!pickHighestConfidence(e->evidence.lanesTotal, total, totalSrc)) {
+        return; // no lane-count witness — nothing to flag
+    }
+    const std::string& type = e->myHighWayType; // possibly compound (a|b)
+
+    auto hasType = [&type](const std::string& needle) {
+        return type.find(needle) != std::string::npos;
+    };
+
+    if (total > 10) {
+        WRITE_WARNINGF(TL("Implausible lane count for edge '%': lanes=% (from %, type=%). Real-world maximum is rarely above 10; likely a tagging error."),
+                       toString(e->id), total, totalSrc, type);
+    }
+    if (total == 1 && hasType("highway.motorway")) {
+        WRITE_WARNINGF(TL("Suspicious lane count for edge '%': lanes=1 on a motorway-class way (type=%, from %). Almost always a tagging error."),
+                       toString(e->id), type, totalSrc);
+    }
+    if (total >= 4 && hasType("highway.residential")) {
+        WRITE_WARNINGF(TL("Suspicious lane count for edge '%': lanes=% on highway=residential (from %). Likely should be classified as tertiary or higher."),
+                       toString(e->id), total, totalSrc);
+    }
+    if (total > 6
+            && !hasType("highway.motorway")
+            && !hasType("highway.trunk")
+            && !hasType("highway.primary")) {
+        WRITE_WARNINGF(TL("Suspicious lane count for edge '%': lanes=% on type=% (from %). Counts above 6 are unusual outside motorway/trunk/primary."),
+                       toString(e->id), total, type, totalSrc);
+    }
+}
+
+/// Returns the maximum value across a witness list, ignoring missing
+/// (empty) lists. Used when several lower-confidence witnesses point at the
+/// same attribute and we want the most generous estimate.
+int maxWitnessedValue(const std::vector<NIOSMEvidence<int>>& witnesses,
+                      std::string& outSource) {
+    int best = -1;
+    for (const auto& w : witnesses) {
+        if (w.value > best) {
+            best = w.value;
+            outSource = w.sourceTag;
+        }
+    }
+    return best;
+}
+
+/// Lane-count inference. When the way has no explicit `lanes=` tag but
+/// does have per-direction or per-lane pipe-count witnesses, derive a
+/// total lane count from them and apply it to the Edge. Sets myNoLanes
+/// (and myNoLanes{Forward,Backward}Explicit when only one direction is
+/// witnessed) so the existing direction-split logic at insertEdge picks
+/// up the value.
+///
+/// Skipped silently when --osm.repair is at warn level or below; only
+/// 'infer' and 'aggressive' enable the actual mutation.
+template <typename EdgeT>
+bool repairLaneCountFromWitnesses(EdgeT* e) {
+    if (e->myNoLanes >= 0) {
+        return false; // explicit lanes= tag already present
+    }
+    std::string fwdSrc, bwdSrc, bwSrc;
+    const int forward  = maxWitnessedValue(e->evidence.lanesForward,  fwdSrc);
+    const int backward = maxWitnessedValue(e->evidence.lanesBackward, bwdSrc);
+    const int bothWays = maxWitnessedValue(e->evidence.lanesBothWays, bwSrc);
+    if (forward < 0 && backward < 0 && bothWays < 0) {
+        return false; // no pipe-count witnesses either
+    }
+
+    // Derive the new value via the lane-count-balance conservation:
+    // total = forward + backward + both_ways. Any missing direction
+    // contributes 0.
+    int newTotal = (forward >= 0 ? forward : 0)
+                 + (backward >= 0 ? backward : 0)
+                 + (bothWays >= 0 ? bothWays : 0);
+    std::ostringstream provenance;
+    bool first = true;
+    auto addPart = [&](int v, const std::string& src, const char* name) {
+        if (v < 0) return;
+        if (!first) provenance << " + ";
+        provenance << name << "=" << v << " (" << src << ")";
+        first = false;
+    };
+    addPart(forward, fwdSrc, "lanes:forward witness");
+    addPart(backward, bwdSrc, "lanes:backward witness");
+    addPart(bothWays, bwSrc, "lanes:both_ways witness");
+
+    e->myNoLanes = newTotal;
+    if (forward >= 0 && backward < 0) {
+        e->myNoLanesForwardExplicit = forward;
+    } else if (backward >= 0 && forward < 0) {
+        e->myNoLanesBackwardExplicit = backward;
+    }
+    WRITE_MESSAGEF(TL("Inferred lane count for edge '%': lanes=% (from %)."),
+                   toString(e->id), toString(newTotal), provenance.str());
+    return true;
+}
+
+/// Width plausibility warnings. Implausibly narrow per-lane width usually
+/// means the way's lane count is wrong; implausibly wide usually means the
+/// lane count is undercounted. Roundabouts and service ways have weird
+/// geometry by design and are excluded from the upper bound.
+template <typename EdgeT>
+void checkWidthPlausibility(const EdgeT* e) {
+    if (e->myWidth <= 0) {
+        return;
+    }
+    int lanes = -1;
+    std::string lanesSrc;
+    if (!pickHighestConfidence(e->evidence.lanesTotal, lanes, lanesSrc)) {
+        return;
+    }
+    if (lanes <= 0) {
+        return;
+    }
+    const double perLane = e->myWidth / lanes;
+    const std::string& type = e->myHighWayType;
+    auto hasType = [&type](const std::string& needle) {
+        return type.find(needle) != std::string::npos;
+    };
+
+    if (perLane < 2.0) {
+        WRITE_WARNINGF(TL("Implausibly narrow per-lane width for edge '%': width=%/lanes=% = % m. Likely the lane count is over-stated."),
+                       toString(e->id), toString(e->myWidth), toString(lanes), toString(perLane));
+    }
+    if (perLane > 6.0 && !e->myAmInRoundabout && !hasType("highway.service")) {
+        WRITE_WARNINGF(TL("Implausibly wide per-lane width for edge '%': width=%/lanes=% = % m. Likely the lane count is under-counted."),
+                       toString(e->id), toString(e->myWidth), toString(lanes), toString(perLane));
+    }
+}
+
+/// Construction-class data-quality warnings. (a) highway=construction with
+/// no construction=* tag means we cannot resolve the underlying class;
+/// (b) start_date in the past on a still-construction-tagged way is stale
+/// OSM data; (c) end_date set on a non-lifecycle-tagged way means the
+/// mapper meant the road is gone but didn't say so.
+template <typename EdgeT>
+void checkLifecycleDataQuality(const EdgeT* e, const std::string& todayDate) {
+    // (a) highway=construction with no construction=* tag.
+    if (e->myHighWayType.find("highway.construction") != std::string::npos
+            && e->myExtraTags.count("construction") == 0
+            && e->myLifecycleStatus.empty()) {
+        WRITE_WARNINGF(TL("Edge '%' is tagged highway=construction but no construction=* tag resolves the underlying class; using highway.construction defaults."),
+                       toString(e->id));
+    }
+    // (b) construction-status way with start_date in the past relative to today.
+    if (!e->myLifecycleStatus.empty() && e->myLifecycleStatus == "construction"
+            && !e->myStartDate.empty() && !todayDate.empty()
+            && isLikelyIsoDate(e->myStartDate)
+            && padIsoDateLatest(e->myStartDate) < todayDate) {
+        WRITE_WARNINGF(TL("Edge '%' is tagged construction:* but its start_date='%' is in the past relative to today (%); the OSM data may be stale (road may have opened)."),
+                       toString(e->id), e->myStartDate, todayDate);
+    }
+    // (c) end_date set on an operational (non-lifecycle) way.
+    if (e->myLifecycleStatus.empty() && !e->myEndDate.empty()) {
+        WRITE_WARNINGF(TL("Edge '%' has end_date='%' but no lifecycle prefix (disused:, abandoned:, was:, etc.). The way is being treated as operational; the mapper may have meant to mark it as historical."),
+                       toString(e->id), e->myEndDate);
+    }
+}
+
+/// Maxspeed plausibility warnings, mirroring checkLaneCountPlausibility.
+/// Speeds in the witness store are already in m/s as parsed by interpretSpeed.
+/// Pure observation. Skips ways with no speed witness (typemap default would
+/// dominate at resolve time, not visible here).
+template <typename EdgeT>
+void checkSpeedPlausibility(const EdgeT* e) {
+    double speed = -1.0;
+    std::string speedSrc;
+    if (!pickHighestConfidence(e->evidence.speedForward, speed, speedSrc)) {
+        return;
+    }
+    if (speed <= 0.0) {
+        return; // signals/sign/MAXSPEED_UNGIVEN paths leave a non-positive value
+    }
+    const double kmh = speed * 3.6;
+    const std::string& type = e->myHighWayType;
+    auto hasType = [&type](const std::string& needle) {
+        return type.find(needle) != std::string::npos;
+    };
+
+    if (kmh >= 100.0 && hasType("highway.residential")) {
+        WRITE_WARNINGF(TL("Suspicious maxspeed for edge '%': % km/h on highway=residential (from %). Class probably wrong (likely tertiary or higher)."),
+                       toString(e->id), toString(kmh), speedSrc);
+    }
+    if (kmh < 20.0 && hasType("highway.motorway")) {
+        WRITE_WARNINGF(TL("Suspicious maxspeed for edge '%': % km/h on a motorway-class way (type=%, from %). Class or speed probably wrong."),
+                       toString(e->id), toString(kmh), type, speedSrc);
+    }
+    if (kmh > 200.0) {
+        WRITE_WARNINGF(TL("Implausible maxspeed for edge '%': % km/h (from %, type=%). Real-world legal maximums rarely exceed 200 km/h."),
+                       toString(e->id), toString(kmh), speedSrc, type);
+    }
+}
+
+/// Oneway-blocks-backward observer. If the resolved oneway state is "true"
+/// (the way carries traffic in only one direction) and any lanesBackward
+/// witnesses exist, then either:
+///   - a per-mode oneway exception (oneway:bus=no etc.) explains the
+///     contraflow lane: no warning, the contraflow case is handled, OR
+///   - no exception is present: warn — this is the bare contradiction case
+///     (oneway tag says no backward travel, yet a backward lane is tagged).
+template <typename EdgeT>
+void checkOnewayBackwardConflict(const EdgeT* e) {
+    std::string onewayValue, onewaySrc;
+    if (!pickHighestConfidence(e->evidence.oneway, onewayValue, onewaySrc)) {
+        return; // no oneway witness, nothing to check
+    }
+    if (!isOnewayValue(onewayValue)) {
+        return; // oneway resolves to bidirectional, no conflict possible
+    }
+    if (e->evidence.lanesBackward.empty()) {
+        return; // no backward lane witnesses, no conflict
+    }
+    if (!e->evidence.onewayExceptions.empty()) {
+        return; // contraflow case: per-mode exception explains backward lane(s)
+    }
+
+    std::ostringstream msg;
+    msg << "Oneway/backward conflict for edge '" << e->id
+        << "': oneway=" << onewayValue << " (from " << onewaySrc
+        << ") but backward lane witnesses exist:";
+    for (const auto& w : e->evidence.lanesBackward) {
+        msg << " " << w.value << " (" << w.sourceTag << ")";
+    }
+    msg << ". No per-mode oneway:*=no exception was tagged. Resolved Edge fields unchanged.";
+    WRITE_WARNING(msg.str());
+}
+
+} // anonymous namespace
+
+
+// ---------------------------------------------------------------------------
 // definitions of NIImporter_OpenStreetMap::EdgesHandler-methods
 // ---------------------------------------------------------------------------
 NIImporter_OpenStreetMap::EdgesHandler::EdgesHandler(
@@ -1773,6 +2341,9 @@ NIImporter_OpenStreetMap::EdgesHandler::EdgesHandler(
     mySpeedMap["signals"] = MAXSPEED_UNGIVEN;
     mySpeedMap["none"] = unlimitedSpeed;
     mySpeedMap["no"] = unlimitedSpeed;
+    // OSM "walk" denotes pedestrian flow speed; the OSM wiki cites 1.0-1.4 m/s
+    // typical walking, ~5 km/h here matches the upper end.
+    // https://wiki.openstreetmap.org/wiki/Key:maxspeed#Special_values
     mySpeedMap["walk"] = 5. / 3.6;
     // https://wiki.openstreetmap.org/wiki/Key:source:maxspeed#Commonly_used_values
     mySpeedMap["AT:urban"] = 50. / 3.6;
@@ -1891,6 +2462,33 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
     if (element == SUMO_TAG_TAG && myCurrentEdge != nullptr) {
         bool ok = true;
         std::string key = attrs.get<std::string>(SUMO_ATTR_K, toString(myCurrentEdge->id).c_str(), ok, false);
+        // Preserve the raw OSM key for --osm.all-attributes retention so
+        // lifecycle-prefixed forms like "construction:highway" survive in
+        // the <param> output even though we strip the prefix for the rest
+        // of the parser below.
+        const std::string rawKey = key;
+        // Lifecycle prefix handling. Tags like construction:highway=residential
+        // describe ways that are not currently operational but use the
+        // attribute set of the named class. Strip the prefix, record the
+        // status on the edge, and let the rest of the parser process the
+        // tags as if they applied to the underlying class. Edges with a
+        // lifecycle status are discarded at myEndElement by default.
+        {
+            static const char* const lifecyclePrefixes[] = {
+                "construction:", "proposed:", "disused:", "abandoned:",
+                "razed:", "demolished:", "removed:", "was:", "planned:"
+            };
+            for (const char* const prefix : lifecyclePrefixes) {
+                const std::string p = prefix;
+                if (StringUtils::startsWith(key, p)) {
+                    if (myCurrentEdge->myLifecycleStatus.empty()) {
+                        myCurrentEdge->myLifecycleStatus = p.substr(0, p.size() - 1);
+                    }
+                    key = key.substr(p.size());
+                    break;
+                }
+            }
+        }
         if (key.size() > 6 && StringUtils::startsWith(key, "busway:")) {
             // handle special busway keys
             const std::string buswaySpec = key.substr(7);
@@ -1905,9 +2503,9 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                 key = "ignore";
             }
         }
-        if (myAllAttributes && (myExtraAttributes.count(key) != 0 || myExtraAttributes.size() == 0)) {
-            const std::string info = "way=" + toString(myCurrentEdge->id) + ", k=" + key;
-            myCurrentEdge->setParameter(key, attrs.get<std::string>(SUMO_ATTR_V, info.c_str(), ok, false));
+        if (myAllAttributes && (myExtraAttributes.count(rawKey) != 0 || myExtraAttributes.size() == 0)) {
+            const std::string info = "way=" + toString(myCurrentEdge->id) + ", k=" + rawKey;
+            myCurrentEdge->setParameter(rawKey, attrs.get<std::string>(SUMO_ATTR_V, info.c_str(), ok, false));
         }
         // we check whether the key is relevant (and we really need to transcode the value) to avoid hitting #1636
         if (!StringUtils::endsWith(key, "way")
@@ -1938,16 +2536,75 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                 && key != "psv"
                 && key != "foot"
                 && key != "bicycle"
+                && key != "vehicle"
+                && key != "motor_vehicle"
+                && key != "motorcar"
+                && key != "hgv"
+                && key != "taxi"
+                && key != "motorcycle"
+                && key != "moped"
+                && key != "start_date"
+                && key != "end_date"
                 && key != "oneway:bicycle"
                 && key != "oneway:bus"
                 && key != "oneway:psv"
+                && key != "oneway:hgv"
+                && key != "oneway:motor_vehicle"
+                && key != "oneway:motorcar"
+                && key != "access:conditional"
+                && key != "motor_vehicle:conditional"
+                && key != "vehicle:conditional"
+                && key != "bus:conditional"
+                && key != "hgv:conditional"
+                && key != "maxspeed:conditional"
+                && key != "maxspeed:variable"
+                && key != "maxspeed:advisory"
+                && key != "maxspeed:lanes"
+                && key != "maxspeed:lanes:forward"
+                && key != "maxspeed:lanes:backward"
+                && key != "maxspeed:hgv"
+                && key != "maxspeed:bus"
+                && key != "maxspeed:bicycle"
+                && key != "maxspeed:taxi"
+                && key != "maxspeed:motorcycle"
+                && key != "maxspeed:moped"
                 && key != "placement"
                 && key != "bus:lanes"
                 && key != "bus:lanes:forward"
                 && key != "bus:lanes:backward"
+                && key != "lanes:bus"
+                && key != "lanes:bus:forward"
+                && key != "lanes:bus:backward"
                 && key != "psv:lanes"
                 && key != "psv:lanes:forward"
                 && key != "psv:lanes:backward"
+                && key != "lanes:psv"
+                && key != "lanes:psv:forward"
+                && key != "lanes:psv:backward"
+                && key != "hgv:lanes"
+                && key != "hgv:lanes:forward"
+                && key != "hgv:lanes:backward"
+                && key != "lanes:hgv"
+                && key != "lanes:hgv:forward"
+                && key != "lanes:hgv:backward"
+                && key != "taxi:lanes"
+                && key != "taxi:lanes:forward"
+                && key != "taxi:lanes:backward"
+                && key != "lanes:taxi"
+                && key != "lanes:taxi:forward"
+                && key != "lanes:taxi:backward"
+                && key != "motorcycle:lanes"
+                && key != "motorcycle:lanes:forward"
+                && key != "motorcycle:lanes:backward"
+                && key != "moped:lanes"
+                && key != "moped:lanes:forward"
+                && key != "moped:lanes:backward"
+                && key != "motor_vehicle:lanes"
+                && key != "motor_vehicle:lanes:forward"
+                && key != "motor_vehicle:lanes:backward"
+                && key != "motorcar:lanes"
+                && key != "motorcar:lanes:forward"
+                && key != "motorcar:lanes:backward"
                 && key != "bicycle:lanes"
                 && key != "bicycle:lanes:forward"
                 && key != "bicycle:lanes:backward"
@@ -2095,30 +2752,148 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
             addType(singleTypeID);
 
         } else if (key == "bus" || key == "psv") {
-            // 'psv' includes taxi in the UK but not in germany
+            // OSM 'psv' = public service vehicle, covers buses *and* taxis
+            // (including legal carve-outs on bus/psv lanes). 'bus' is
+            // bus-only. Absence of either tag is not informative -- it
+            // does not imply disallow.
+            const SVCPermissions psvClasses = (key == "psv") ? (SVC_BUS | SVC_TAXI) : SVC_BUS;
             try {
                 if (StringUtils::toBool(value)) {
-                    myCurrentEdge->myExtraAllowed |= SVC_BUS;
+                    myCurrentEdge->myExtraAllowed |= psvClasses;
+                    // explicit per-mode allow: wins over broader implicit
+                    // disallows like motor_vehicle=no
+                    myCurrentEdge->myExplicitlyAllowed |= psvClasses;
                     addType(key);
                 } else {
-                    myCurrentEdge->myExtraDisallowed |= SVC_BUS;
+                    myCurrentEdge->myExtraDisallowed |= psvClasses;
                 }
             } catch (const BoolFormatException&) {
-                myCurrentEdge->myExtraAllowed |= SVC_BUS;
+                myCurrentEdge->myExtraAllowed |= psvClasses;
+                myCurrentEdge->myExplicitlyAllowed |= psvClasses;
                 addType(key);
             }
         } else if (key == "emergency") {
             try {
                 if (StringUtils::toBool(value)) {
                     myCurrentEdge->myExtraAllowed |= SVC_AUTHORITY | SVC_EMERGENCY;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_AUTHORITY | SVC_EMERGENCY;
                 }
             } catch (const BoolFormatException&) {
                 myCurrentEdge->myExtraAllowed |= SVC_AUTHORITY | SVC_EMERGENCY;
+                myCurrentEdge->myExplicitlyAllowed |= SVC_AUTHORITY | SVC_EMERGENCY;
             }
         } else if (key == "access") {
-            if (value == "no") {
-                myCurrentEdge->myExtraDisallowed |= ~(SVC_PUBLIC_CLASSES | SVC_EMERGENCY | SVC_AUTHORITY);
+            // OSM access semantics (https://wiki.openstreetmap.org/wiki/Key:access).
+            // Strict: a broader prohibition disallows everything except the
+            // emergency/authority real-world convention. Buses / public
+            // transport are NOT implicitly exempt -- they require an explicit
+            // bus=yes / psv=yes to be re-allowed (which works via the line-524
+            // explicit-allow tracking).
+            if (value == "no" || value == "private") {
+                myCurrentEdge->myExtraDisallowed |= ~(SVC_EMERGENCY | SVC_AUTHORITY);
+            } else if (value == "destination" || value == "customers" || value == "delivery") {
+                // restricted to destination/delivery traffic
+                myCurrentEdge->myExtraDisallowed |= ~(SVC_EMERGENCY | SVC_AUTHORITY | SVC_DELIVERY);
+            } else if (value == "agricultural" || value == "forestry") {
+                // No direct SUMO equivalent; restrict to the same minimum set as 'no'
+                myCurrentEdge->myExtraDisallowed |= ~(SVC_EMERGENCY | SVC_AUTHORITY);
+                WRITE_WARNINGF(TL("Edge '%' has access=% which has no direct SUMO equivalent; treating as restricted (only emergency/authority allowed)."),
+                               toString(myCurrentEdge->id), value);
             }
+            // access=yes and access=permissive are no-ops (default unrestricted).
+        } else if (key == "vehicle") {
+            // OSM "vehicle" covers all wheeled vehicles (motor + bicycle).
+            // Strict: broader vehicle prohibitions disallow ALL wheeled
+            // classes including public transport. Explicit per-mode tags
+            // (bus=yes, etc.) re-allow specific classes via the line-524
+            // explicit-allow tracking; emergency/authority are kept as a
+            // real-world convention.
+            if (value == "no" || value == "private") {
+                myCurrentEdge->myExtraDisallowed |=
+                    (SVC_ROAD_MOTOR_CLASSES | SVC_BICYCLE | SVC_SCOOTER)
+                    & ~(SVC_EMERGENCY | SVC_AUTHORITY);
+            } else if (value == "destination" || value == "customers" || value == "delivery") {
+                myCurrentEdge->myExtraDisallowed |=
+                    (SVC_ROAD_MOTOR_CLASSES | SVC_BICYCLE | SVC_SCOOTER)
+                    & ~(SVC_EMERGENCY | SVC_AUTHORITY | SVC_DELIVERY);
+            } else if (value == "yes" || value == "permissive") {
+                myCurrentEdge->myExtraAllowed |= SVC_ROAD_MOTOR_CLASSES | SVC_BICYCLE | SVC_SCOOTER;
+            }
+        } else if (key == "motor_vehicle" || key == "motorcar") {
+            // Block or permit motorised road traffic. Strict: broader
+            // prohibition disallows ALL motorised classes including buses;
+            // explicit motor_vehicle=yes / bus=yes re-allows via explicit-allow tracking.
+            try {
+                if (StringUtils::toBool(value)) {
+                    myCurrentEdge->myExtraAllowed |= SVC_ROAD_MOTOR_CLASSES;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_ROAD_MOTOR_CLASSES;
+                } else {
+                    myCurrentEdge->myExtraDisallowed |=
+                        SVC_ROAD_MOTOR_CLASSES & ~(SVC_EMERGENCY | SVC_AUTHORITY);
+                }
+            } catch (const BoolFormatException&) {
+                // destination/private/customers/etc. on motor_vehicle: treat
+                // as restrictive like 'no', warning the user about the
+                // unsupported nuance.
+                myCurrentEdge->myExtraDisallowed |=
+                    SVC_ROAD_MOTOR_CLASSES & ~(SVC_EMERGENCY | SVC_AUTHORITY);
+                if (value != "designated") {
+                    WRITE_WARNINGF(TL("Edge '%' has %=% ; treating as motor traffic disallowed."),
+                                   toString(myCurrentEdge->id), key, value);
+                }
+            }
+        } else if (key == "hgv") {
+            try {
+                if (StringUtils::toBool(value)) {
+                    myCurrentEdge->myExtraAllowed |= SVC_TRUCK | SVC_TRAILER;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_TRUCK | SVC_TRAILER;
+                } else {
+                    myCurrentEdge->myExtraDisallowed |= SVC_TRUCK | SVC_TRAILER;
+                }
+            } catch (const BoolFormatException&) {
+                myCurrentEdge->myExtraAllowed |= SVC_TRUCK | SVC_TRAILER;
+                myCurrentEdge->myExplicitlyAllowed |= SVC_TRUCK | SVC_TRAILER;
+            }
+        } else if (key == "taxi") {
+            try {
+                if (StringUtils::toBool(value)) {
+                    myCurrentEdge->myExtraAllowed |= SVC_TAXI;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_TAXI;
+                } else {
+                    myCurrentEdge->myExtraDisallowed |= SVC_TAXI;
+                }
+            } catch (const BoolFormatException&) {
+                myCurrentEdge->myExtraAllowed |= SVC_TAXI;
+                myCurrentEdge->myExplicitlyAllowed |= SVC_TAXI;
+            }
+        } else if (key == "motorcycle") {
+            try {
+                if (StringUtils::toBool(value)) {
+                    myCurrentEdge->myExtraAllowed |= SVC_MOTORCYCLE;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_MOTORCYCLE;
+                } else {
+                    myCurrentEdge->myExtraDisallowed |= SVC_MOTORCYCLE;
+                }
+            } catch (const BoolFormatException&) {
+                myCurrentEdge->myExtraAllowed |= SVC_MOTORCYCLE;
+                myCurrentEdge->myExplicitlyAllowed |= SVC_MOTORCYCLE;
+            }
+        } else if (key == "moped") {
+            try {
+                if (StringUtils::toBool(value)) {
+                    myCurrentEdge->myExtraAllowed |= SVC_MOPED;
+                    myCurrentEdge->myExplicitlyAllowed |= SVC_MOPED;
+                } else {
+                    myCurrentEdge->myExtraDisallowed |= SVC_MOPED;
+                }
+            } catch (const BoolFormatException&) {
+                myCurrentEdge->myExtraAllowed |= SVC_MOPED;
+                myCurrentEdge->myExplicitlyAllowed |= SVC_MOPED;
+            }
+        } else if (key == "start_date") {
+            myCurrentEdge->myStartDate = value;
+        } else if (key == "end_date") {
+            myCurrentEdge->myEndDate = value;
         } else if (StringUtils::startsWith(key, "width:lanes")) {
             try {
                 const std::vector<std::string> values = StringTokenizer(value, "|").getVector();
@@ -2130,8 +2905,12 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
 
                 if (key == "width:lanes" || key == "width:lanes:forward") {
                     myCurrentEdge->myWidthLanesForward = widthLanes;
+                    myCurrentEdge->evidence.lanesForward.emplace_back(
+                        (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
                 } else if (key == "width:lanes:backward") {
                     myCurrentEdge->myWidthLanesBackward = widthLanes;
+                    myCurrentEdge->evidence.lanesBackward.emplace_back(
+                        (int)values.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
                 } else {
                     WRITE_WARNINGF(TL("Using default lane width for edge '%' as key '%' could not be parsed."), toString(myCurrentEdge->id), key);
                 }
@@ -2141,6 +2920,8 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "width") {
             try {
                 myCurrentEdge->myWidth = StringUtils::parseDist(value);
+                myCurrentEdge->evidence.width.emplace_back(
+                    myCurrentEdge->myWidth, "width", NIOSMConfidence::HIGH);
             } catch (const NumberFormatException&) {
                 WRITE_WARNINGF(TL("Using default width for edge '%' as value '%' could not be parsed."), toString(myCurrentEdge->id), value);
             }
@@ -2162,7 +2943,39 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
             if (value == "no") {
                 // need to add a bus way in reversed direction of way
                 myCurrentEdge->myBuswayType = WAY_BACKWARD;
+                myCurrentEdge->evidence.onewayExceptions.emplace_back(
+                    key.substr(7), key, NIOSMConfidence::HIGH);
             }
+        } else if (key == "oneway:hgv" || key == "oneway:motor_vehicle" || key == "oneway:motorcar") {
+            // Per-mode oneway exceptions for HGVs and motor traffic.
+            // Captured as a witness so the reconciler sees the contraflow
+            // case (see checkOnewayBackwardConflict). No dedicated
+            // SUMO-level reverse-access mechanism yet (unlike buses with
+            // myBuswayType); record as parameter for downstream tooling.
+            if (value == "no") {
+                myCurrentEdge->evidence.onewayExceptions.emplace_back(
+                    key.substr(7), key, NIOSMConfidence::HIGH);
+                myCurrentEdge->setParameter(key, value);
+            }
+        } else if (key == "access:conditional"
+                   || key == "motor_vehicle:conditional"
+                   || key == "vehicle:conditional"
+                   || key == "bus:conditional"
+                   || key == "hgv:conditional"
+                   || key == "maxspeed:conditional"
+                   || key == "maxspeed:variable"
+                   || key == "maxspeed:advisory") {
+            // Surface conditional/variable/advisory constraints as
+            // parameters on the edge. The value language ("60 @ (Mo-Fr
+            // 07:00-19:00)", "peak_traffic", etc.) describes time-varying
+            // behaviour that the static network can't express; the edge
+            // keeps whatever non-conditional maxspeed (or typemap default)
+            // it would otherwise have. Brief informational warning so the
+            // user knows the conditional data is preserved as <param> but
+            // not enforced at runtime.
+            WRITE_WARNINGF(TL("Edge '%' has time-varying tag %=%; preserved as <param>, static edge speed unchanged."),
+                           toString(myCurrentEdge->id), key, value);
+            myCurrentEdge->setParameter(key, value);
         } else if (key == "placement") {
             if (!interpretPlacement(value, myCurrentEdge->myPlacement, myCurrentEdge->myPlacementLane)) {
                 WRITE_WARNINGF(TL("Ignoring unsupported placement value '%' for edge '%'."), value, myCurrentEdge->id);
@@ -2170,6 +2983,8 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "lanes") {
             try {
                 myCurrentEdge->myNoLanes = StringUtils::toInt(value);
+                myCurrentEdge->evidence.lanesTotal.emplace_back(
+                    myCurrentEdge->myNoLanes, "lanes", NIOSMConfidence::HIGH);
             } catch (NumberFormatException&) {
                 // might be a list of values
                 StringTokenizer st(value, ";", true);
@@ -2182,7 +2997,10 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                             minLanes = MIN2(minLanes, numLanes);
                         }
                         myCurrentEdge->myNoLanes = minLanes;
-                        WRITE_WARNINGF(TL("Using minimum lane number from list (%) for edge '%'."), value, toString(myCurrentEdge->id));
+                        myCurrentEdge->evidence.lanesTotal.emplace_back(
+                            minLanes, "lanes (semicolon-list min)", NIOSMConfidence::MEDIUM);
+                        WRITE_WARNINGF(TL("Edge '%' has lanes=% which is a non-standard semicolon list; using the minimum (%). The OSM lanes key expects a single integer; verify the source data."),
+                                       toString(myCurrentEdge->id), value, toString(minLanes));
                     } catch (NumberFormatException&) {
                         WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
                     }
@@ -2193,23 +3011,40 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "lanes:forward") {
             try {
                 const int numLanes = StringUtils::toInt(value);
-                if (myCurrentEdge->myNoLanesForward < 0 && myCurrentEdge->myNoLanes < 0) {
+                if (myCurrentEdge->myNoLanesBackwardExplicit > 0 && myCurrentEdge->myNoLanes < 0) {
                     // fix lane count in case only lanes:forward and lanes:backward are set
-                    myCurrentEdge->myNoLanes = numLanes - myCurrentEdge->myNoLanesForward;
+                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesBackwardExplicit;
                 }
-                myCurrentEdge->myNoLanesForward = numLanes;
+                myCurrentEdge->myNoLanesForwardExplicit = numLanes;
+                myCurrentEdge->evidence.lanesForward.emplace_back(
+                    numLanes, "lanes:forward", NIOSMConfidence::HIGH);
             } catch (...) {
                 WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
             }
         } else if (key == "lanes:backward") {
             try {
                 const int numLanes = StringUtils::toInt(value);
-                if (myCurrentEdge->myNoLanesForward > 0 && myCurrentEdge->myNoLanes < 0) {
+                if (myCurrentEdge->myNoLanesForwardExplicit > 0 && myCurrentEdge->myNoLanes < 0) {
                     // fix lane count in case only lanes:forward and lanes:backward are set
-                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesForward;
+                    myCurrentEdge->myNoLanes = numLanes + myCurrentEdge->myNoLanesForwardExplicit;
                 }
-                // denote backwards count with a negative sign
-                myCurrentEdge->myNoLanesForward = -numLanes;
+                myCurrentEdge->myNoLanesBackwardExplicit = numLanes;
+                myCurrentEdge->evidence.lanesBackward.emplace_back(
+                    numLanes, "lanes:backward", NIOSMConfidence::HIGH);
+            } catch (...) {
+                WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
+            }
+        } else if (key == "lanes:both_ways") {
+            // OSM's center two-way left-turn lane (TWLTL). Parsed into the
+            // witness store; downstream reconciliation can use it via the
+            // lane-count balance constraint. SUMO has no native TWLTL
+            // primitive yet, so the value is recorded as a parameter for
+            // downstream consumers.
+            try {
+                const int numLanes = StringUtils::toInt(value);
+                myCurrentEdge->evidence.lanesBothWays.emplace_back(
+                    numLanes, "lanes:both_ways", NIOSMConfidence::HIGH);
+                myCurrentEdge->setParameter("lanes:both_ways", value);
             } catch (...) {
                 WRITE_WARNINGF(TL("Value of key '%' is not numeric ('%') in edge '%'."), key, value, myCurrentEdge->id);
             }
@@ -2217,17 +3052,64 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                    (key == "maxspeed" || key == "maxspeed:type" || key == "maxspeed:forward" || key == "zone:maxspeed")) {
             // both 'maxspeed' and 'maxspeed:type' may be given so we must take care not to overwrite an already seen value
             myCurrentEdge->myMaxSpeed = interpretSpeed(key, value);
+            // maxspeed:type and zone:maxspeed are country/zone-defaulted lookups, not direct measurements
+            const NIOSMConfidence speedConf = (key == "maxspeed:type" || key == "zone:maxspeed")
+                ? NIOSMConfidence::MEDIUM_HIGH : NIOSMConfidence::HIGH;
+            myCurrentEdge->evidence.speedForward.emplace_back(myCurrentEdge->myMaxSpeed, key, speedConf);
         } else if (key == "maxspeed:backward" && myCurrentEdge->myMaxSpeedBackward == MAXSPEED_UNGIVEN) {
             myCurrentEdge->myMaxSpeedBackward = interpretSpeed(key, value);
+            myCurrentEdge->evidence.speedBackward.emplace_back(
+                myCurrentEdge->myMaxSpeedBackward, "maxspeed:backward", NIOSMConfidence::HIGH);
+        } else if (key == "maxspeed:lanes" || key == "maxspeed:lanes:forward"
+                   || key == "maxspeed:lanes:backward") {
+            // Per-lane maxspeed override. Pipe-separated, one entry per
+            // lane. An empty entry leaves the lane at the edge default.
+            const std::vector<std::string> values = StringTokenizer(value, "|").getVector();
+            std::vector<double> perLane;
+            perLane.reserve(values.size());
+            for (const std::string& v : values) {
+                if (v.empty()) {
+                    perLane.push_back(MAXSPEED_UNGIVEN);
+                } else {
+                    try {
+                        perLane.push_back(interpretSpeed(key, v));
+                    } catch (...) {
+                        WRITE_WARNINGF(TL("Edge '%' has unparseable maxspeed:lanes entry '%' in tag %=%; defaulting that lane."),
+                                       toString(myCurrentEdge->id), v, key, value);
+                        perLane.push_back(MAXSPEED_UNGIVEN);
+                    }
+                }
+            }
+            if (key == "maxspeed:lanes:backward") {
+                myCurrentEdge->mySpeedLanesBackward = perLane;
+                myCurrentEdge->evidence.lanesBackward.emplace_back(
+                    (int)perLane.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            } else {
+                myCurrentEdge->mySpeedLanesForward = perLane;
+                myCurrentEdge->evidence.lanesForward.emplace_back(
+                    (int)perLane.size(), key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            }
+        } else if (key == "maxspeed:hgv" || key == "maxspeed:bus"
+                   || key == "maxspeed:bicycle" || key == "maxspeed:taxi"
+                   || key == "maxspeed:motorcycle" || key == "maxspeed:moped") {
+            // Per-vehicle-class maxspeed. SUMO has no per-class lane
+            // speed in the network model; surface as <param> so downstream
+            // tools (TraCI, custom routing) can act on it.
+            myCurrentEdge->setParameter(key, value);
         } else if (key == "junction") {
             if ((value == "roundabout" || value == "circular") && myCurrentEdge->myIsOneWay.empty()) {
                 myCurrentEdge->myIsOneWay = "yes";
+            }
+            if (value == "roundabout" || value == "circular") {
+                myCurrentEdge->evidence.oneway.emplace_back(
+                    std::string("yes"), "junction=" + value, NIOSMConfidence::MEDIUM_HIGH);
             }
             if (value == "roundabout") {
                 myCurrentEdge->myAmInRoundabout = true;
             }
         } else if (key == "oneway") {
             myCurrentEdge->myIsOneWay = value;
+            myCurrentEdge->evidence.oneway.emplace_back(value, "oneway", NIOSMConfidence::HIGH);
         } else if (key == "name") {
             myCurrentEdge->streetName = value;
         } else if (key == "ref") {
@@ -2243,6 +3125,8 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
             try {
                 if (StringUtils::toInt(value) == 1) {
                     myCurrentEdge->myIsOneWay = "true";
+                    myCurrentEdge->evidence.oneway.emplace_back(
+                        std::string("yes"), "tracks=1", NIOSMConfidence::MEDIUM_HIGH);
                 } else {
                     WRITE_WARNINGF(TL("Ignoring track count % for edge '%'."), value, myCurrentEdge->id);
                 }
@@ -2284,19 +3168,128 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
         } else if (key == "vehicle:lanes" || key == "vehicle:lanes:forward") {
             interpretLaneUse(value, SVC_PASSENGER, true);
             interpretLaneUse(value, SVC_PRIVATE, true);
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
         } else if (key == "vehicle:lanes:backward") {
             interpretLaneUse(value, SVC_PASSENGER, false);
             interpretLaneUse(value, SVC_PRIVATE, false);
-        } else if (key == "bus:lanes" || key == "bus:lanes:forward") {
-            interpretLaneUse(value, SVC_BUS, true);
-        } else if (key == "bus:lanes:backward") {
-            interpretLaneUse(value, SVC_BUS, false);
-        } else if (key == "psv:lanes" || key == "psv:lanes:forward") {
-            interpretLaneUse(value, SVC_BUS, true);
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "bus:lanes" || key == "bus:lanes:forward" || key == "lanes:bus" || key == "lanes:bus:forward") {
+            try {
+                const int cnt = StringUtils::toInt(value);
+                myCurrentEdge->myBusLanesForwardCount = cnt;
+                myCurrentEdge->myBusLanesForwardClasses |= SVC_BUS;
+                myCurrentEdge->evidence.lanesForward.emplace_back(cnt, key + " count", NIOSMConfidence::HIGH);
+            } catch (...) {
+                interpretLaneUse(value, SVC_BUS, true);
+                myCurrentEdge->evidence.lanesForward.emplace_back(
+                    (int)StringTokenizer(value, "|").getVector().size(),
+                    key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            }
+        } else if (key == "bus:lanes:backward" || key == "lanes:bus:backward") {
+            try {
+                const int cnt = StringUtils::toInt(value);
+                myCurrentEdge->myBusLanesBackwardCount = cnt;
+                myCurrentEdge->myBusLanesBackwardClasses |= SVC_BUS;
+                myCurrentEdge->evidence.lanesBackward.emplace_back(cnt, key + " count", NIOSMConfidence::HIGH);
+            } catch (...) {
+                interpretLaneUse(value, SVC_BUS, false);
+                myCurrentEdge->evidence.lanesBackward.emplace_back(
+                    (int)StringTokenizer(value, "|").getVector().size(),
+                    key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            }
+        } else if (key == "psv:lanes" || key == "psv:lanes:forward" || key == "lanes:psv" || key == "lanes:psv:forward") {
+            try {
+                const int cnt = StringUtils::toInt(value);
+                myCurrentEdge->myBusLanesForwardCount = cnt;
+                myCurrentEdge->myBusLanesForwardClasses |= (SVC_BUS | SVC_TAXI);
+                myCurrentEdge->evidence.lanesForward.emplace_back(cnt, key + " count", NIOSMConfidence::HIGH);
+            } catch (...) {
+                interpretLaneUse(value, SVC_BUS, true);
+                interpretLaneUse(value, SVC_TAXI, true);
+                myCurrentEdge->evidence.lanesForward.emplace_back(
+                    (int)StringTokenizer(value, "|").getVector().size(),
+                    key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            }
+        } else if (key == "psv:lanes:backward" || key == "lanes:psv:backward") {
+            try {
+                const int cnt = StringUtils::toInt(value);
+                myCurrentEdge->myBusLanesBackwardCount = cnt;
+                myCurrentEdge->myBusLanesBackwardClasses |= (SVC_BUS | SVC_TAXI);
+                myCurrentEdge->evidence.lanesBackward.emplace_back(cnt, key + " count", NIOSMConfidence::HIGH);
+            } catch (...) {
+                interpretLaneUse(value, SVC_BUS, false);
+                interpretLaneUse(value, SVC_TAXI, false);
+                myCurrentEdge->evidence.lanesBackward.emplace_back(
+                    (int)StringTokenizer(value, "|").getVector().size(),
+                    key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+            }
+        } else if (key == "hgv:lanes" || key == "hgv:lanes:forward" || key == "lanes:hgv" || key == "lanes:hgv:forward") {
+            interpretLaneUse(value, SVC_TRUCK, true);
+            interpretLaneUse(value, SVC_TRAILER, true);
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "hgv:lanes:backward" || key == "lanes:hgv:backward") {
+            interpretLaneUse(value, SVC_TRUCK, false);
+            interpretLaneUse(value, SVC_TRAILER, false);
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "taxi:lanes" || key == "taxi:lanes:forward" || key == "lanes:taxi" || key == "lanes:taxi:forward") {
             interpretLaneUse(value, SVC_TAXI, true);
-        } else if (key == "psv:lanes:backward") {
-            interpretLaneUse(value, SVC_BUS, false);
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "taxi:lanes:backward" || key == "lanes:taxi:backward") {
             interpretLaneUse(value, SVC_TAXI, false);
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "motorcycle:lanes" || key == "motorcycle:lanes:forward") {
+            interpretLaneUse(value, SVC_MOTORCYCLE, true);
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "motorcycle:lanes:backward") {
+            interpretLaneUse(value, SVC_MOTORCYCLE, false);
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "moped:lanes" || key == "moped:lanes:forward") {
+            interpretLaneUse(value, SVC_MOPED, true);
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "moped:lanes:backward") {
+            interpretLaneUse(value, SVC_MOPED, false);
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "motor_vehicle:lanes" || key == "motorcar:lanes"
+                   || key == "motor_vehicle:lanes:forward" || key == "motorcar:lanes:forward") {
+            // Apply to the motorised road classes as a group (matches the
+            // semantics of the per-edge motor_vehicle=/motorcar= tags).
+            for (const SUMOVehicleClass svc : {SVC_PASSENGER, SVC_HOV, SVC_TAXI, SVC_BUS,
+                                               SVC_COACH, SVC_DELIVERY, SVC_TRUCK, SVC_TRAILER,
+                                               SVC_MOTORCYCLE, SVC_MOPED, SVC_E_VEHICLE}) {
+                interpretLaneUse(value, svc, true);
+            }
+            myCurrentEdge->evidence.lanesForward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+        } else if (key == "motor_vehicle:lanes:backward" || key == "motorcar:lanes:backward") {
+            for (const SUMOVehicleClass svc : {SVC_PASSENGER, SVC_HOV, SVC_TAXI, SVC_BUS,
+                                               SVC_COACH, SVC_DELIVERY, SVC_TRUCK, SVC_TRAILER,
+                                               SVC_MOTORCYCLE, SVC_MOPED, SVC_E_VEHICLE}) {
+                interpretLaneUse(value, svc, false);
+            }
+            myCurrentEdge->evidence.lanesBackward.emplace_back(
+                (int)StringTokenizer(value, "|").getVector().size(),
+                key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
         } else if (key == "bicycle:lanes" || key == "bicycle:lanes:forward") {
             interpretLaneUse(value, SVC_BICYCLE, true);
         } else if (key == "bicycle:lanes:backward") {
@@ -2321,31 +3314,101 @@ NIImporter_OpenStreetMap::EdgesHandler::myStartElement(int element, const SUMOSA
                     turnCode = (int)LinkDirection::STRAIGHT;
                 }
                 for (std::string code : codes) {
-                    if (code == "" || code == "none" || code == "through") {
-                        turnCode |= (int)LinkDirection::STRAIGHT << shift ;
-                    } else if (code == "left" || code == "sharp_left") {
-                        turnCode |= (int)LinkDirection::LEFT << shift;
-                    } else if (code == "right" || code == "sharp_right") {
-                        turnCode |= (int)LinkDirection::RIGHT << shift;
-                    } else if (code == "slight_left") {
-                        turnCode |= (int)LinkDirection::PARTLEFT << shift;
-                    } else if (code == "slight_right") {
-                        turnCode |= (int)LinkDirection::PARTRIGHT << shift;
-                    } else if (code == "reverse") {
-                        turnCode |= (int)LinkDirection::TURN << shift;
-                    } else if (code == "merge_to_left" || code == "merge_to_right") {
-                        turnCode |= (int)LinkDirection::NODIR << shift;
+                    // Case-normalize before matching so YES/Yes/yes etc.
+                    // all dispatch consistently.
+                    std::transform(code.begin(), code.end(), code.begin(),
+                                   [](unsigned char c) { return (char)std::tolower(c); });
+                    int dir = niOSMTurnCodeToLinkDirection(code);
+                    if (dir < 0) {
+                        // Fuzzy auto-repair under --osm.repair=infer or
+                        // aggressive. Levenshtein-distance-2 match against
+                        // the canonical set, never replacing if multiple
+                        // canonical candidates tie.
+                        const std::string repair = OptionsCont::getOptions().getString("osm.repair");
+                        if (repair == "infer" || repair == "aggressive") {
+                            const std::string repaired = niOSMFuzzyMatchTurnCode(code);
+                            if (!repaired.empty()) {
+                                dir = niOSMTurnCodeToLinkDirection(repaired);
+                                WRITE_WARNINGF(TL("Edge '%' turn:lanes code '%' auto-repaired to '%' (fuzzy match in tag %=%)."),
+                                               toString(myCurrentEdge->id), code, repaired, key, value);
+                            }
+                        }
+                        if (dir < 0) {
+                            // Missing-pipe heuristic: if the unknown
+                            // token splits cleanly into two canonical
+                            // codes, surface that as a likely missing |.
+                            std::string missingPipeFirst, missingPipeSecond;
+                            for (size_t splitPos = 2; splitPos + 2 <= code.size(); ++splitPos) {
+                                const std::string left = code.substr(0, splitPos);
+                                const std::string right = code.substr(splitPos);
+                                if (niOSMTurnCodeToLinkDirection(left) >= 0
+                                        && niOSMTurnCodeToLinkDirection(right) >= 0) {
+                                    missingPipeFirst = left;
+                                    missingPipeSecond = right;
+                                    break;
+                                }
+                            }
+                            if (!missingPipeFirst.empty()) {
+                                WRITE_WARNINGF(TL("Edge '%' turn:lanes code '%' looks like '%' and '%' concatenated without a '|' separator (in tag %=%); ignoring this entry."),
+                                               toString(myCurrentEdge->id), code, missingPipeFirst, missingPipeSecond, key, value);
+                            } else {
+                                // Surface unknown values that we didn't
+                                // repair (or repair was disabled).
+                                WRITE_WARNINGF(TL("Edge '%' has unknown turn:lanes code '%' in tag %=%; ignoring this entry."),
+                                               toString(myCurrentEdge->id), code, key, value);
+                            }
+                            continue;
+                        }
                     }
+                    turnCode |= dir << shift;
                 }
                 turnCodes.push_back(turnCode);
             }
-            if (StringUtils::endsWith(key, "lanes") || StringUtils::endsWith(key, "lanes:forward")) {
+            // An unsuffixed turn:lanes describes the way's traversal
+            // direction. For a normal way that's the forward edge; for a
+            // oneway=-1 / oneway=reverse way the actual driving direction
+            // is the backward edge, so route it there. (Best-effort: if
+            // the oneway tag is parsed *after* the turn:lanes tag in the
+            // OSM XML stream, we'll have already routed to forward and
+            // will miss the swap.)
+            const bool reverseOneway = (myCurrentEdge->myIsOneWay == "-1"
+                                        || myCurrentEdge->myIsOneWay == "reverse");
+            const bool unsuffixed = StringUtils::endsWith(key, "lanes")
+                                    && !StringUtils::endsWith(key, "lanes:forward")
+                                    && !StringUtils::endsWith(key, "lanes:backward")
+                                    && !StringUtils::endsWith(key, "lanes:both_ways");
+            if (StringUtils::endsWith(key, "lanes:forward")
+                    || (unsuffixed && !reverseOneway)) {
                 mergeTurnSigns(myCurrentEdge->myTurnSignsForward, turnCodes);
-            } else if (StringUtils::endsWith(key, "lanes:backward")) {
+            } else if (StringUtils::endsWith(key, "lanes:backward")
+                       || (unsuffixed && reverseOneway)) {
                 mergeTurnSigns(myCurrentEdge->myTurnSignsBackward, turnCodes);
             } else if (StringUtils::endsWith(key, "lanes:both_ways")) {
                 mergeTurnSigns(myCurrentEdge->myTurnSignsForward, turnCodes);
                 mergeTurnSigns(myCurrentEdge->myTurnSignsBackward, turnCodes);
+            }
+            // Pipe count witnesses lane count in the matching direction.
+            // Only the unqualified turn:lanes variants count: class-qualified
+            // forms (turn:bus:lanes, turn:taxi:lanes, turn:bicycle:lanes)
+            // describe per-class sign assignments and don't witness total
+            // lane count.
+            if (shift == 0) {
+                const int pipeCount = (int)values.size();
+                // Same direction-routing rule as for the turn-sign vectors above.
+                if (StringUtils::endsWith(key, "lanes:forward")
+                        || (unsuffixed && !reverseOneway)) {
+                    myCurrentEdge->evidence.lanesForward.emplace_back(
+                        pipeCount, key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+                } else if (StringUtils::endsWith(key, "lanes:backward")
+                           || (unsuffixed && reverseOneway)) {
+                    myCurrentEdge->evidence.lanesBackward.emplace_back(
+                        pipeCount, key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+                } else if (StringUtils::endsWith(key, "lanes:both_ways")) {
+                    myCurrentEdge->evidence.lanesForward.emplace_back(
+                        pipeCount, key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+                    myCurrentEdge->evidence.lanesBackward.emplace_back(
+                        pipeCount, key + " pipe count", NIOSMConfidence::MEDIUM_HIGH);
+                }
             }
         }
     }
@@ -2374,6 +3437,16 @@ NIImporter_OpenStreetMap::EdgesHandler::addType(const std::string& singleTypeID)
 double
 NIImporter_OpenStreetMap::EdgesHandler::interpretSpeed(const std::string& key, std::string value) {
     if (mySpeedMap.find(value) != mySpeedMap.end()) {
+        // sign / signals / nan indicate variable or sign-controlled limits
+        // that the static network can't represent; the edge falls through
+        // to the typemap class default. none / no are explicit "no posted
+        // limit" tags (typical on German autobahn) and need no warning --
+        // the substituted value is intentional.
+        if (value == "sign" || value == "signals" || value == "nan") {
+            WRITE_WARNINGF(TL("Edge '%' has %=% (variable / sign-controlled limit); preserved as <param>, edge speed falls back to highway-class default."),
+                           toString(myCurrentEdge->id), key, value);
+            myCurrentEdge->setParameter(key, value);
+        }
         return mySpeedMap[value];
     } else {
         // handle symbolic names of the form DE:30 / DE:zone30
@@ -2483,7 +3556,90 @@ NIImporter_OpenStreetMap::EdgesHandler::interpretLaneUse(const std::string& valu
 void
 NIImporter_OpenStreetMap::EdgesHandler::myEndElement(int element) {
     if (element == SUMO_TAG_WAY && myCurrentEdge != nullptr) {
+        // Combined lifecycle and date-window inclusion policy.
+        const std::string& simulatedDate = OptionsCont::getOptions().getString("osm.date");
+        const DateStatus dateStatus = checkDateWindow(myCurrentEdge, simulatedDate);
+
+        // Date-window check applies even to operational ways: a way with
+        // end_date in the past should not be in the simulated network.
+        if (dateStatus == DateStatus::OutOfRange && myCurrentEdge->myLifecycleStatus.empty()) {
+            WRITE_MESSAGEF(TL("Discarding operational way '%' outside the simulated date window (start_date='%', end_date='%', --osm.date='%')."),
+                           toString(myCurrentEdge->id),
+                           myCurrentEdge->myStartDate,
+                           myCurrentEdge->myEndDate,
+                           simulatedDate);
+            delete myCurrentEdge;
+            myCurrentEdge = nullptr;
+            return;
+        }
+
+        // Lifecycle policy. Default: drop non-operational ways with a
+        // warning. Override: if --osm.date places the simulated date
+        // inside the way's [start_date, end_date] window, include it as
+        // operational.
+        if (!myCurrentEdge->myLifecycleStatus.empty()) {
+            // razed/demolished/removed ways describe roads that physically
+            // no longer exist. They are always discarded regardless of
+            // --osm.lifecycle and --osm.date settings -- there is no
+            // geometry to include.
+            const std::string& status = myCurrentEdge->myLifecycleStatus;
+            if (status == "razed" || status == "demolished" || status == "removed") {
+                if (OptionsCont::getOptions().getString("osm.lifecycle") == "warn") {
+                    WRITE_WARNINGF(TL("Discarding physically-gone way '%' (lifecycle status: %)."),
+                                   toString(myCurrentEdge->id), status);
+                }
+                delete myCurrentEdge;
+                myCurrentEdge = nullptr;
+                return;
+            }
+            const bool dateOverridesLifecycle = (dateStatus == DateStatus::InRange);
+            if (!dateOverridesLifecycle) {
+                const std::string lifecyclePolicy = OptionsCont::getOptions().getString("osm.lifecycle");
+                if (lifecyclePolicy != "include") {
+                    if (lifecyclePolicy == "warn") {
+                        WRITE_WARNINGF(TL("Discarding non-operational way '%' (lifecycle status: %)."),
+                                       toString(myCurrentEdge->id),
+                                       myCurrentEdge->myLifecycleStatus);
+                    }
+                    delete myCurrentEdge;
+                    myCurrentEdge = nullptr;
+                    return;
+                }
+            } else {
+                WRITE_MESSAGEF(TL("Including non-operational way '%' (lifecycle: %) because --osm.date=% falls within [start_date='%', end_date='%']."),
+                               toString(myCurrentEdge->id),
+                               myCurrentEdge->myLifecycleStatus,
+                               simulatedDate,
+                               myCurrentEdge->myStartDate,
+                               myCurrentEdge->myEndDate);
+            }
+            // Record the lifecycle status as a parameter so downstream tools
+            // can still see it whether we're including via 'include' or
+            // via date override.
+            myCurrentEdge->setParameter("osm.lifecycle", myCurrentEdge->myLifecycleStatus);
+        }
         if (myCurrentEdge->myCurrentIsRoad) {
+            // OSM-tag-evidence reconciliation, gated by --osm.repair so
+            // default behaviour is unchanged. 'infer' and 'aggressive'
+            // enable lane-count repair; 'warn' is observer-only.
+            const std::string repair = OptionsCont::getOptions().getString("osm.repair");
+            if (repair == "infer" || repair == "aggressive") {
+                repairLaneCountFromWitnesses(myCurrentEdge);
+            }
+            if (repair != "off") {
+                checkLaneCountBalance(myCurrentEdge);
+                checkOnewayBackwardConflict(myCurrentEdge);
+                checkWitnessAgreement(myCurrentEdge->evidence.lanesTotal,    "lanesTotal",    myCurrentEdge);
+                checkWitnessAgreement(myCurrentEdge->evidence.lanesForward,  "lanesForward",  myCurrentEdge);
+                checkWitnessAgreement(myCurrentEdge->evidence.lanesBackward, "lanesBackward", myCurrentEdge);
+                checkWitnessAgreement(myCurrentEdge->evidence.speedForward,  "speedForward",  myCurrentEdge);
+                checkWitnessAgreement(myCurrentEdge->evidence.speedBackward, "speedBackward", myCurrentEdge);
+                checkLaneCountPlausibility(myCurrentEdge);
+                checkSpeedPlausibility(myCurrentEdge);
+                checkWidthPlausibility(myCurrentEdge);
+                checkLifecycleDataQuality(myCurrentEdge,
+                    OptionsCont::getOptions().getString("osm.date"));
+            }
             const auto insertionIt = myEdgeMap.lower_bound(myCurrentEdge->id);
             if (insertionIt == myEdgeMap.end() || insertionIt->first != myCurrentEdge->id) {
                 // assume we are loading multiple files, so we won't report duplicate edges
@@ -2538,7 +3694,8 @@ NIImporter_OpenStreetMap::RelationHandler::resetValues() {
     myFromWay = INVALID_ID;
     myToWay = INVALID_ID;
     myViaNode = INVALID_ID;
-    myViaWay = INVALID_ID;
+    myExtraViaNodes.clear();
+    myViaWays.clear();
     myStation = INVALID_ID;
     myRestrictionType = RestrictionType::UNKNOWN;
     myPlatforms.clear();
@@ -2578,10 +3735,18 @@ NIImporter_OpenStreetMap::RelationHandler::myStartElement(int element, const SUM
             // u-turns for divided ways may be given with 2 via-nodes or 1 via-way
             std::string memberType = attrs.get<std::string>(SUMO_ATTR_TYPE, nullptr, ok);
             if (memberType == "way" && checkEdgeRef(ref)) {
-                myViaWay = ref;
+                myViaWays.push_back(ref);
             } else if (memberType == "node") {
                 if (myOSMNodes.find(ref) != myOSMNodes.end()) {
-                    myViaNode = ref;
+                    if (myViaNode == INVALID_ID) {
+                        myViaNode = ref;
+                    } else {
+                        // Multi-via-node case (e.g. divided-way u-turns).
+                        // Stash extras; applyRestriction will use the
+                        // last-listed via-node as the junction where the
+                        // restriction is applied.
+                        myExtraViaNodes.push_back(ref);
+                    }
                 } else {
                     WRITE_WARNINGF(TL("No node found for reference '%' in relation '%'."), toString(ref), toString(myCurrentRelation));
                 }
@@ -2733,7 +3898,7 @@ NIImporter_OpenStreetMap::RelationHandler::myEndElement(int element) {
                 WRITE_WARNINGF(TL("Ignoring restriction relation '%' with unknown to-way."), toString(myCurrentRelation));
                 ok = false;
             }
-            if (myViaNode == INVALID_ID && myViaWay == INVALID_ID) {
+            if (myViaNode == INVALID_ID && myViaWays.empty()) {
                 WRITE_WARNINGF(TL("Ignoring restriction relation '%' with unknown via."), toString(myCurrentRelation));
                 ok = false;
             }
@@ -2896,12 +4061,34 @@ bool
 NIImporter_OpenStreetMap::RelationHandler::applyRestriction() const {
     // since OSM ways are bidirectional we need the via to figure out which direction was meant
     if (myViaNode != INVALID_ID) {
-        NBNode* viaNode = myOSMNodes.find(myViaNode)->second->node;
+        // For multi-via-node restrictions (divided-way u-turns and friends),
+        // apply at the LAST via-node listed -- that's the junction where
+        // to-way originates. Intermediate via-nodes mark the geometric
+        // path but aren't enforced.
+        const long long anchorNode = myExtraViaNodes.empty()
+            ? myViaNode : myExtraViaNodes.back();
+        if (!myExtraViaNodes.empty()) {
+            WRITE_WARNINGF(TL("Restriction relation '%' has % via-nodes; applying restriction only at the final via -> to junction (node '%'). Intermediate via-nodes are not enforced."),
+                           toString(myCurrentRelation),
+                           toString(1 + (int)myExtraViaNodes.size()),
+                           toString(anchorNode));
+        }
+        NBNode* viaNode = myOSMNodes.find(anchorNode)->second->node;
         if (viaNode == nullptr) {
-            WRITE_WARNINGF(TL("Via-node '%' was not instantiated"), toString(myViaNode));
+            WRITE_WARNINGF(TL("Via-node '%' was not instantiated"), toString(anchorNode));
             return false;
         }
-        NBEdge* from = findEdgeRef(myFromWay, viaNode->getIncomingEdges());
+        // For multi-via-node, look up the from-edge at the FIRST via-node
+        // (where from-way ends) and to-edge at the LAST (anchor) via-node.
+        // For single-via, both lookups happen at the same node.
+        NBNode* fromAnchorNode = viaNode;
+        if (!myExtraViaNodes.empty()) {
+            auto firstIt = myOSMNodes.find(myViaNode);
+            if (firstIt != myOSMNodes.end() && firstIt->second->node != nullptr) {
+                fromAnchorNode = firstIt->second->node;
+            }
+        }
+        NBEdge* from = findEdgeRef(myFromWay, fromAnchorNode->getIncomingEdges());
         NBEdge* to = findEdgeRef(myToWay, viaNode->getOutgoingEdges());
         if (from == nullptr) {
             WRITE_WARNINGF(TL("from-edge '%' of restriction relation could not be determined"), toString(myFromWay));
@@ -2936,8 +4123,88 @@ NIImporter_OpenStreetMap::RelationHandler::applyRestriction() const {
                 }
             }
         }
+    } else if (!myViaWays.empty()) {
+        // Via-way restriction. The OSM convention is that the turn
+        // happens at the (last) via-way -> to-way junction; we disable
+        // the via-edge's connection to the to-edge (for no_*) or
+        // constrain it to be the only outgoing connection (for only_*).
+        // For multi-via-way restrictions we apply only at the final
+        // junction; the intermediate via-ways are not enforced at the
+        // SUMO level (no multi-step memory in connections). Surface this
+        // approximation as a warning so the user knows.
+        if (myViaWays.size() > 1) {
+            WRITE_WARNINGF(TL("Restriction relation '%' has % via-ways; applying restriction only at the final via -> to junction. Intermediate via-ways are not enforced."),
+                           toString(myCurrentRelation), toString((int)myViaWays.size()));
+        }
+        const long long int viaWayId = myViaWays.back();
+        auto viaIt = myOSMEdges.find(viaWayId);
+        if (viaIt == myOSMEdges.end() || viaIt->second->myCurrentNodes.size() < 2) {
+            WRITE_WARNINGF(TL("Via-way '%' not found or has too few nodes for restriction relation '%'."),
+                           toString(viaWayId), toString(myCurrentRelation));
+            return false;
+        }
+        const long long firstNode = viaIt->second->myCurrentNodes.front();
+        const long long lastNode = viaIt->second->myCurrentNodes.back();
+        auto firstIt = myOSMNodes.find(firstNode);
+        auto lastIt = myOSMNodes.find(lastNode);
+        if (firstIt == myOSMNodes.end() || lastIt == myOSMNodes.end()
+                || firstIt->second->node == nullptr || lastIt->second->node == nullptr) {
+            WRITE_WARNINGF(TL("Via-way '%' endpoint nodes not instantiated for restriction relation '%'."),
+                           toString(viaWayId), toString(myCurrentRelation));
+            return false;
+        }
+        NBNode* nodeFirst = firstIt->second->node;
+        NBNode* nodeLast = lastIt->second->node;
+
+        // For multi-via, the "from" lookup compares against the *first*
+        // via-way (which connects to from), but the via-edge we operate on
+        // is the *last* via-way (which connects to to). Single-via case
+        // reduces to from-way and via-way being adjacent.
+        const long long int firstViaId = myViaWays.front();
+        NBEdge* from = findEdgeRef(myFromWay, nodeFirst->getIncomingEdges());
+        NBEdge* viaEdge = findEdgeRef(viaWayId, nodeFirst->getOutgoingEdges());
+        NBEdge* to = findEdgeRef(myToWay, nodeLast->getOutgoingEdges());
+        if (from == nullptr || viaEdge == nullptr || to == nullptr) {
+            // try reverse via-way orientation
+            from = findEdgeRef(myFromWay, nodeLast->getIncomingEdges());
+            viaEdge = findEdgeRef(viaWayId, nodeLast->getOutgoingEdges());
+            to = findEdgeRef(myToWay, nodeFirst->getOutgoingEdges());
+        }
+        if (myViaWays.size() > 1) {
+            // For multi-via, from-way isn't adjacent to the LAST via-way;
+            // we don't validate the from match in the chained case, only
+            // the via->to anchor.
+            (void)firstViaId; // silence unused warning if not needed below
+            if (viaEdge == nullptr || to == nullptr) {
+                WRITE_WARNINGF(TL("Could not locate final via/to edges for chained restriction relation '%' (last via-way '%')."),
+                               toString(myCurrentRelation), toString(viaWayId));
+                return false;
+            }
+        } else if (from == nullptr || viaEdge == nullptr || to == nullptr) {
+            WRITE_WARNINGF(TL("Could not locate from/via/to edges for restriction relation '%' with via-way '%'."),
+                           toString(myCurrentRelation), toString(viaWayId));
+            return false;
+        }
+        if (myRestrictionType == RestrictionType::ONLY) {
+            viaEdge->addEdge2EdgeConnection(to, true);
+            for (NBEdge* cand : viaEdge->getToNode()->getOutgoingEdges()) {
+                if (cand != to && !viaEdge->isConnectedTo(cand)) {
+                    if (myRestrictionException == SVC_IGNORING) {
+                        viaEdge->removeFromConnections(cand, -1, -1, true);
+                    } else {
+                        viaEdge->addEdge2EdgeConnection(cand, true, myRestrictionException);
+                    }
+                }
+            }
+        } else {
+            if (myRestrictionException == SVC_IGNORING) {
+                viaEdge->removeFromConnections(to, -1, -1, true);
+            } else {
+                viaEdge->addEdge2EdgeConnection(to, true, myRestrictionException);
+            }
+        }
     } else {
-        // XXX interpreting via-ways or via-node lists not yet implemented
+        // Multi-via-way / via-node-list restrictions still unsupported.
         WRITE_WARNINGF(TL("direction of restriction relation could not be determined%"), "");
         return false;
     }

@@ -1,0 +1,2 @@
+Warning: Lane-count witnesses inconsistent for edge '1000': total=3 (from lanes) but forward+backward=4 (forward=2 from lanes:forward, backward=2 from turn:lanes:backward pipe count). Resolved Edge fields unchanged.
+Success.

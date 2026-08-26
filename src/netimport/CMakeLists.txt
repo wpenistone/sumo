@@ -23,6 +23,8 @@ set(netimport_STAT_SRCS
    NIImporter_SUMO.h
    NIImporter_VISUM.cpp
    NIImporter_VISUM.h
+   NIOSMCanonicalValues.h
+   NIOSMTagEvidence.h
    NIVisumTL.cpp
    NIVisumTL.h
    NIXMLConnectionsHandler.cpp

@@ -1,0 +1,7 @@
+=== unit-normalization ===
+Success.
+        <lane id="9001_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="22.35" length="111.19" shape="9.26,0.06 7.77,111.24"/>
+        <lane id="9001_1" index="1" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="22.35" length="111.19" shape="6.06,0.02 4.57,111.20"/>
+        <lane id="9002_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="22.22" length="111.19" shape="7.77,111.24 6.29,222.42"/>
+        <lane id="9002_1" index="1" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="22.22" length="111.19" shape="4.57,111.20 3.09,222.38"/>
+        <lane id="9003_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="10.29" length="111.20" shape="6.29,222.42 4.80,333.61"/>

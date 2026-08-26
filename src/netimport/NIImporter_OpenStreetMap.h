@@ -30,6 +30,7 @@
 #include <utils/common/UtilExceptions.h>
 #include <utils/common/Parameterised.h>
 #include <netbuild/NBPTPlatform.h>
+#include "NIOSMTagEvidence.h"
 
 
 // ===========================================================================
@@ -181,7 +182,7 @@ protected:
     class Edge : public Parameterised {
     public:
         explicit Edge(long long int _id) :
-            id(_id), myNoLanes(-1), myNoLanesForward(0),
+            id(_id), myNoLanes(-1), myNoLanesForwardExplicit(0), myNoLanesBackwardExplicit(0),
             myMaxSpeed(MAXSPEED_UNGIVEN),
             myMaxSpeedBackward(MAXSPEED_UNGIVEN),
             myExtraAllowed(0),
@@ -211,8 +212,12 @@ protected:
         std::string ref;
         /// @brief number of lanes, or -1 if unknown
         int myNoLanes;
-        /// @brief number of lanes in forward direction or 0 if unknown, negative if backwards lanes are meant
-        int myNoLanesForward;
+        /// @brief Explicitly tagged lanes:forward count (0 if unset).
+        /// The two directional counts each live in their own field; lane
+        /// allocation reads them independently.
+        int myNoLanesForwardExplicit;
+        /// @brief Explicitly tagged lanes:backward count (0 if unset).
+        int myNoLanesBackwardExplicit;
         /// @brief maximum speed in km/h, or MAXSPEED_UNGIVEN
         double myMaxSpeed;
         /// @brief maximum speed in km/h, or MAXSPEED_UNGIVEN
@@ -221,6 +226,12 @@ protected:
         SVCPermissions myExtraAllowed;
         /// @brief Extra permissions prohibited from tags instead of highway type
         SVCPermissions myExtraDisallowed;
+        /// @brief Subset of myExtraAllowed that came from an explicit per-mode
+        /// allow tag (bus=yes, taxi=yes, etc.) as opposed to a broader/less
+        /// specific tag like psv=yes. Used at insertEdge to make explicit
+        /// allows win over implicit-disallow conflicts (e.g. bus=yes
+        /// overrides motor_vehicle=no).
+        SVCPermissions myExplicitlyAllowed{0};
         /// @brief The type, stored in "highway" key
         std::string myHighWayType;
         /// @brief Information whether this is an one-way road
@@ -251,6 +262,14 @@ protected:
         std::vector<SVCPermissions> myDisallowedLaneForward;
         /// @brief (optional) information about additional disallowed SVCs on backward lane(s)
         std::vector<SVCPermissions> myDisallowedLaneBackward;
+        /// @brief (optional) count of rightmost bus/PSV lanes (forward direction)
+        int myBusLanesForwardCount{0};
+        /// @brief (optional) count of rightmost bus/PSV lanes (backward direction)
+        int myBusLanesBackwardCount{0};
+        /// @brief SVC permissions for rightmost bus/PSV lanes (forward direction)
+        SVCPermissions myBusLanesForwardClasses{0};
+        /// @brief SVC permissions for rightmost bus/PSV lanes (backward direction)
+        SVCPermissions myBusLanesBackwardClasses{0};
         /// @brief Information about the relative z-ordering of ways
         int myLayer;
         /// @brief The list of nodes this edge is made of
@@ -272,6 +291,38 @@ protected:
         std::vector<double> myWidthLanesForward;
         std::vector<double> myWidthLanesBackward;
         double myWidth;
+
+        /// @brief Per-lane maxspeed override from maxspeed:lanes /
+        /// maxspeed:lanes:forward / maxspeed:lanes:backward. Stored in
+        /// m/s after unit conversion. An entry of MAXSPEED_UNGIVEN means
+        /// "use the edge default" (e.g. an empty pipe slot).
+        std::vector<double> mySpeedLanesForward;
+        std::vector<double> mySpeedLanesBackward;
+
+        /// @brief OSM-tag evidence collected during parsing for cross-tag
+        /// reconciliation (see NIOSMTagEvidence.h and
+        /// docs/netconvert_osm_import_plan.md).
+        NIOSMTagEvidence evidence;
+
+        /// @brief Non-empty when the way was tagged with a lifecycle
+        /// prefix (construction:highway=*, disused:highway=*,
+        /// proposed:highway=*, abandoned:highway=*, razed:highway=*,
+        /// was:highway=*, planned:highway=*, demolished:highway=*,
+        /// removed:highway=*). Holds the prefix without the trailing ':'.
+        /// Used in EdgesHandler::myEndElement to discard non-operational
+        /// edges by default; future --osm.lifecycle options will allow
+        /// opt-in inclusion.
+        std::string myLifecycleStatus;
+
+        /// @brief Raw value of the OSM start_date tag (the date the way
+        /// came into existence). Combined with --osm.date this enables
+        /// time-aware import (include only ways that exist at the
+        /// simulated date). Empty when unset.
+        std::string myStartDate;
+
+        /// @brief Raw value of the OSM end_date tag (the date the way
+        /// stopped existing). Empty when unset.
+        std::string myEndDate;
 
     private:
         /// invalidated assignment operator
@@ -678,7 +729,18 @@ protected:
 
         /// @brief the via node/way for the current restriction
         long long int myViaNode;
-        long long int myViaWay;
+        /// @brief Additional via-nodes for restrictions naming more than
+        /// one (e.g. divided-way u-turns crossing two parallel via-nodes).
+        /// Single-via-node case continues to use myViaNode for backward
+        /// compatibility; multi-via-node entries land here.
+        std::vector<long long int> myExtraViaNodes;
+        /// @brief Via-ways for the current restriction. Multi-entry support
+        /// covers OSM "u-turn for divided ways" (often a single via-way) plus
+        /// chained-segment restrictions (rare). For multi-via-way the
+        /// restriction is applied at the last via -> to junction; the
+        /// intermediate via-ways are not enforced at the SUMO level (a
+        /// warning is emitted to surface this approximation).
+        std::vector<long long int> myViaWays;
 
         /// @brief the station node for the current stop_area
         long long int myStation;

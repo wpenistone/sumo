@@ -1,0 +1,17 @@
+=== bidi-narrow (default: half-width legacy hack) ===
+Success.
+
+=== bidi-narrow (--osm.repair=infer: bidi pair) ===
+Warning: Connection '-4000_0->4000_0' is only 0.00m short.
+Warning: Connection '4000_0->-4000_0' is only 0.00m short.
+Success.
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <osm-files value="docs/netconvert_osm_import_examples/bidi-narrow/input.osm.xml"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <output-file value="docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <lane id=":1_0_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="2.58" length="2.34" width="1.60" shape="0.69,-0.01 1.10,-0.61 1.50,-0.80 1.90,-0.59 2.29,0.01"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <lane id=":2_0_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="2.58" length="2.34" width="1.60" shape="0.80,111.19 0.39,111.79 -0.01,111.98 -0.41,111.77 -0.80,111.17"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <lane id="-4000_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="13.89" length="111.19" width="1.60" shape="-0.80,111.17 0.69,-0.01"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_default.xml:        <lane id="4000_0" index="0" disallow="tram rail_urban rail rail_electric rail_fast ship container cable_car subway aircraft wheelchair scooter drone" speed="13.89" length="111.19" width="1.60" shape="2.29,0.01 0.80,111.19"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_bidi.xml:        <osm-files value="docs/netconvert_osm_import_examples/bidi-narrow/input.osm.xml"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_bidi.xml:        <output-file value="docs/netconvert_osm_import_examples/bidi-narrow/net_bidi.xml"/>
+docs/netconvert_osm_import_examples/bidi-narrow/net_bidi.xml:    <edge id="-4000" from="2" to="1" priority="4" type="highway.unclassified" routingType="narrow" spreadType="center" bidi="4000">
+docs/netconvert_osm_import_examples/bidi-narrow/net_bidi.xml:    <edge id="4000" from="1" to="2" priority="4" type="highway.unclassified" routingType="narrow" spreadType="center" bidi="-4000">

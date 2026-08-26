@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- See README.md. Lane and speed and width plausibility warnings. -->
+<osm version="0.6" generator="hand-written test fixture">
+    <node id="1" lat="50.0000" lon="10.0000"/>
+    <node id="2" lat="50.0010" lon="10.0000"/>
+    <node id="3" lat="50.0020" lon="10.0000"/>
+    <node id="4" lat="50.0030" lon="10.0000"/>
+    <node id="5" lat="50.0040" lon="10.0000"/>
+
+    <!-- lanes=1 on a motorway: tagging error -->
+    <way id="8001">
+        <nd ref="1"/>
+        <nd ref="2"/>
+        <tag k="highway" v="motorway"/>
+        <tag k="lanes" v="1"/>
+        <tag k="oneway" v="yes"/>
+    </way>
+
+    <!-- maxspeed=120 on a residential road -->
+    <way id="8002">
+        <nd ref="2"/>
+        <nd ref="3"/>
+        <tag k="highway" v="residential"/>
+        <tag k="maxspeed" v="120"/>
+    </way>
+
+    <!-- 4 lanes on residential -->
+    <way id="8003">
+        <nd ref="3"/>
+        <nd ref="4"/>
+        <tag k="highway" v="residential"/>
+        <tag k="lanes" v="4"/>
+    </way>
+
+    <!-- 14 lanes (above 10 cap) -->
+    <way id="8004">
+        <nd ref="4"/>
+        <nd ref="5"/>
+        <tag k="highway" v="motorway"/>
+        <tag k="lanes" v="14"/>
+        <tag k="oneway" v="yes"/>
+    </way>
+
+    <!-- implausibly narrow per-lane width -->
+    <way id="8005">
+        <nd ref="1"/>
+        <nd ref="3"/>
+        <tag k="highway" v="primary"/>
+        <tag k="lanes" v="4"/>
+        <tag k="width" v="6"/>
+    </way>
+</osm>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- See README.md. G7 maxspeed unit normalization (case + synonyms). -->
+<osm version="0.6" generator="hand-written test fixture">
+    <node id="1" lat="50.0000" lon="10.0000"/>
+    <node id="2" lat="50.0010" lon="10.0000"/>
+    <node id="3" lat="50.0020" lon="10.0000"/>
+    <node id="4" lat="50.0030" lon="10.0000"/>
+
+    <!-- Uppercase MPH -->
+    <way id="9001">
+        <nd ref="1"/>
+        <nd ref="2"/>
+        <tag k="highway" v="primary"/>
+        <tag k="maxspeed" v="50 MPH"/>
+    </way>
+
+    <!-- KMH (no slash) -->
+    <way id="9002">
+        <nd ref="2"/>
+        <nd ref="3"/>
+        <tag k="highway" v="primary"/>
+        <tag k="maxspeed" v="80 KMH"/>
+    </way>
+
+    <!-- knot abbreviation -->
+    <way id="9003">
+        <nd ref="3"/>
+        <nd ref="4"/>
+        <tag k="highway" v="primary"/>
+        <tag k="maxspeed" v="20 kts"/>
+    </way>
+</osm>

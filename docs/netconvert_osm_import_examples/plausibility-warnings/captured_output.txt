@@ -1,0 +1,10 @@
+=== plausibility-warnings ===
+Warning: Suspicious lane count for edge '8001': lanes=1 on a motorway-class way (type=highway.motorway, from lanes). Almost always a tagging error.
+Warning: Suspicious maxspeed for edge '8002': 120.00 km/h on highway=residential (from maxspeed). Class probably wrong (likely tertiary or higher).
+Warning: Suspicious lane count for edge '8003': lanes=4 on highway=residential (from lanes). Likely should be classified as tertiary or higher.
+Warning: Implausible lane count for edge '8004': lanes=14 (from lanes, type=highway.motorway). Real-world maximum is rarely above 10; likely a tagging error.
+Warning: Implausibly narrow per-lane width for edge '8005': width=6.00/lanes=4 = 1.50 m. Likely the lane count is over-stated.
+Warning: Speed of turning connection '-8005_0->8001_0' reduced by 31.09 due to turning radius of 1.16 (length=2.25, angle=180.00).
+Warning: Speed of turning connection '8002_0->-8005_1' reduced by 27.57 due to turning radius of 1.62 (length=2.35, angle=180.00).
+Warning: Speed of turning connection '8005_1->-8002_0' reduced by 28.00 due to turning radius of 1.19 (length=2.35, angle=180.00).
+Success.

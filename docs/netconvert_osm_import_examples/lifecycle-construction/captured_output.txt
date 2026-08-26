@@ -1,0 +1,6 @@
+=== lifecycle-construction (default discard) ===
+Warning: Discarding non-operational way '3000' (lifecycle status: construction).
+Success.
+
+=== lifecycle-construction (--osm.date 2026-05-12 override) ===
+Success.

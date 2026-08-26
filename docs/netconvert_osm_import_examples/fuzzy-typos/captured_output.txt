@@ -1,0 +1,5 @@
+=== fuzzy-typos ===
+Warning: Edge '7000' turn:lanes code 'lleft' auto-repaired to 'left' (fuzzy match in tag turn:lanes=lleft|throughleft|rigth).
+Warning: Edge '7000' turn:lanes code 'throughleft' looks like 'through' and 'left' concatenated without a '|' separator (in tag turn:lanes=lleft|throughleft|rigth); ignoring this entry.
+Warning: Edge '7000' turn:lanes code 'rigth' auto-repaired to 'right' (fuzzy match in tag turn:lanes=lleft|throughleft|rigth).
+Success.

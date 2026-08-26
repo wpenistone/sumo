@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- See README.md for the scenario. -->
+<osm version="0.6" generator="hand-written test fixture">
+    <node id="1" lat="50.0000" lon="10.0000"/>
+    <node id="2" lat="50.0010" lon="10.0000"/>
+    <node id="3" lat="50.0010" lon="10.0010"/>
+
+    <way id="3000">
+        <nd ref="1"/>
+        <nd ref="2"/>
+        <tag k="construction:highway" v="residential"/>
+        <tag k="lanes" v="2"/>
+        <tag k="start_date" v="2025-06-01"/>
+    </way>
+
+    <way id="3001">
+        <nd ref="2"/>
+        <nd ref="3"/>
+        <tag k="highway" v="residential"/>
+        <tag k="lanes" v="1"/>
+    </way>
+</osm>
