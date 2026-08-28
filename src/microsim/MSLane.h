@@ -1650,6 +1650,11 @@ protected:
     /// definition of the static dictionary type
     typedef std::map< std::string, MSLane* > DictType;
 
+#ifdef HAVE_FOX
+    /// @brief Mutex for access to the cached follower info value
+    mutable FXMutex myPartialOccupatorMutex;
+#endif
+
     /// Static dictionary to associate string-ids with objects.
     static DictType myDict;
 
@@ -1819,8 +1824,6 @@ private:
     mutable FXMutex myLeaderInfoMutex;
     /// @brief Mutex for access to the cached follower info value
     mutable FXMutex myFollowerInfoMutex;
-    /// @brief Mutex for access to the cached follower info value
-    mutable FXMutex myPartialOccupatorMutex;
 #endif
     std::vector<StopWatch<std::chrono::nanoseconds> > myStopWatch;
 
