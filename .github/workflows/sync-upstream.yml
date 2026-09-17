@@ -25,7 +25,15 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.SYNC_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Verify Token Capabilities
+        run: |
+          if [ -z "${{ secrets.SYNC_TOKEN }}" ] && [ -z "${{ secrets.PAT }}" ] && [ -z "${{ secrets.GH_PAT }}" ]; then
+            echo "::warning::Neither SYNC_TOKEN, PAT, nor GH_PAT is set. Pushes may fail if upstream modifies files in .github/workflows/."
+          else
+            echo "Custom token configured for upstream sync."
+          fi
 
       - name: Configure Git Author
         run: |
@@ -71,7 +79,7 @@ jobs:
       - name: Notify on Conflict
         if: failure() && steps.merge_step.outputs.merge_status == 'conflict'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || secrets.PAT || secrets.GH_PAT || secrets.GITHUB_TOKEN }}
         run: |
           gh issue create \
             --title "⚠️ Upstream Sync: Merge Conflict with eclipse-sumo/sumo" \
