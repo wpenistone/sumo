@@ -3807,7 +3807,8 @@ MSVehicle::processLinkApproaches(double& vSafe, double& vSafeMin, double& vSafeM
                     const double shadowLatPos = getLateralPositionOnLane() - myLaneChangeModel->getShadowDirection() * 0.5 * (
                                                     myLane->getWidth() + myLaneChangeModel->getShadowLane()->getWidth());
                     opened = yellow || influencerPrio || (opened && parallelLink->opened(dpi.myArrivalTime, dpi.myArrivalSpeed, dpi.getLeaveSpeed(),
-                                                          getVehicleType().getLength(), getImpatience(),
+                                                          getVehicleType().getLength(),
+                                                          canBrake ? getImpatience() : 1,
                                                           cfModel.getMaxDecel(),
                                                           getWaitingTimeFor(link), shadowLatPos, nullptr,
                                                           ignoreRedLink, this, dpi.myDistance));
@@ -3834,6 +3835,7 @@ MSVehicle::processLinkApproaches(double& vSafe, double& vSafeMin, double& vSafeM
                           << " lastContMajor=" << link->lastWasContMajor()
                           << " isCont=" << link->isCont()
                           << " ignoreRed=" << ignoreRedLink
+                          << " canBrake=" << canBrake
                           << "\n";
             }
 #endif
@@ -7007,6 +7009,10 @@ MSVehicle::getCenterOnEdge(const MSLane* lane) const {
             if (shadowFurther[i] == lane) {
                 assert(myLaneChangeModel->getShadowLane() != 0);
                 return (lane->getRightSideOnEdge() + myLaneChangeModel->getShadowFurtherLanesPosLat()[i] + 0.5 * lane->getWidth()
+                        + (myLane->getCenterOnEdge() - myLaneChangeModel->getShadowLane()->getCenterOnEdge()));
+            } else if (shadowFurther[i]->getBidiLane() == lane) {
+                assert(myLaneChangeModel->getShadowLane() != 0);
+                return (lane->getRightSideOnEdge() - myLaneChangeModel->getShadowFurtherLanesPosLat()[i] + 0.5 * lane->getWidth()
                         + (myLane->getCenterOnEdge() - myLaneChangeModel->getShadowLane()->getCenterOnEdge()));
             }
         }

@@ -66,6 +66,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       SUMO_LIBRARIES: D:\a\sumo\sumo\SUMOLibraries
+      MACOSX_DEPLOYMENT_TARGET: '15.0'
 
     steps:
       - name: Cloning SUMO
@@ -87,14 +88,8 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: compnerd/gha-setup-vsdevenv@v7
 
-      - name: "Set up macOS environment"
-        if: ${{ startsWith(matrix.os, 'macos') }}
-        run: |
-          echo 'CIBW_PROJECT_REQUIRES_PYTHON=>=3.9' >> $GITHUB_ENV
-          echo 'MACOSX_DEPLOYMENT_TARGET=14.0' >> $GITHUB_ENV
-
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2.23
+        uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: ${{ matrix.os }}-${{ matrix.manylinux }}
           variant: ${{ matrix.os == 'windows-latest' && 'sccache' || 'ccache' }}
@@ -105,7 +100,7 @@ jobs:
           python-version: '3.12'
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -119,7 +114,7 @@ jobs:
         #   python tools/build_config/version.py --pep440 build_config/pyproject/eclipse-sumo.toml pyproject.toml
 
       - name: Building wheel eclipse-sumo
-        uses: pypa/cibuildwheel@v4.2.0
+        uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ENVIRONMENT_LINUX: CCACHE_DIR=/host/home/runner/work/sumo/sumo/.ccache
           CIBW_ENVIRONMENT_WINDOWS: CMAKE_GENERATOR=Ninja PATH="D:\\a\\sumo\\sumo\\bin;$PATH"
@@ -137,7 +132,7 @@ jobs:
         run: python tools/build_config/version.py --pep440 build_config/pyproject/libsumo.toml pyproject.toml
 
       - name: Building wheel libsumo
-        uses: pypa/cibuildwheel@v4.2.0
+        uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ENVIRONMENT_LINUX: CCACHE_DIR=/host/home/runner/work/sumo/sumo/.ccache
           CIBW_ENVIRONMENT_WINDOWS: CMAKE_GENERATOR=Ninja PATH="D:\\a\\sumo\\sumo\\bin;$PATH"

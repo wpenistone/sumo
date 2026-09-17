@@ -40,7 +40,7 @@ case "$ID" in
         apt-get -qq update
         apt-get -y install curl $(cat $SCRIPT_DIR/build_req_deb.txt)
         # Adding parquet support libraries
-        curl -LO https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+        curl -LOs https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
         apt-get -y install ./apache-arrow-apt-source-latest-*.deb
         rm ./apache-arrow-apt-source-latest-*.deb
         apt-get -qq update
@@ -73,14 +73,21 @@ case "$ID" in
         dnf install -y arrow-devel-$PARQUET_VERSION parquet-devel-$PARQUET_VERSION
         cd /opt
         # building fox from source
-        curl -LO http://www.fox-toolkit.org/ftp/fox-$FOX_VERSION.tar.gz
-        tar xf fox-$FOX_VERSION.tar.gz
+        if curl -LOs http://fox-toolkit.org/ftp/fox-$FOX_VERSION.tar.gz; then
+            tar xf fox-$FOX_VERSION.tar.gz
+            rm -f fox-$FOX_VERSION.tar.gz
+        else
+            FOX_VERSION=ed07da20d24279afc18951d2b0fbe6dc920a2660
+            curl -LOs --proto =https https://github.com/franko/fox/archive/$FOX_VERSION.zip
+            unzip $FOX_VERSION.zip
+            rm -f $FOX_VERSION.zip
+        fi
         cd fox-$FOX_VERSION
         ./configure --disable-static --enable-shared
         make -j$(nproc)
         make install
         cd ..
-        rm -rf fox-$FOX_VERSION.tar.gz fox-$FOX_VERSION
+        rm -rf fox-$FOX_VERSION
         ;;
     *)
         echo "Unknown or unsupported OS: $ID"
@@ -88,7 +95,7 @@ case "$ID" in
 esac
 
 # building jupedsim from source
-curl -LO https://github.com/PedestrianDynamics/jupedsim/archive/refs/tags/v$JUPEDSIM_VERSION.tar.gz
+curl -LOs --proto =https https://github.com/PedestrianDynamics/jupedsim/archive/refs/tags/v$JUPEDSIM_VERSION.tar.gz
 tar xf v$JUPEDSIM_VERSION.tar.gz
 cmake -B jupedsim-build -DCMAKE_BUILD_TYPE=Release jupedsim-$JUPEDSIM_VERSION
 cmake --build jupedsim-build -j2
@@ -97,5 +104,6 @@ rm -rf v$JUPEDSIM_VERSION.tar.gz jupedsim-$JUPEDSIM_VERSION jupedsim-build
 
 if [[ "$ID" != "macOS" ]]; then
     # see https://github.com/pypa/manylinux/issues/1421
+    pipx uninstall patchelf
     pipx install -f patchelf==0.16.1.0
 fi

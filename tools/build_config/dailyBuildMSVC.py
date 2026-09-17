@@ -57,6 +57,7 @@ BINARIES = ("activitygen", "emissionsDrivingCycle", "emissionsMap",
             "netconvert", "netedit", "netgenerate",
             "od2trips", "polyconvert", "sumo", "sumo-gui",
             "TraCITestClient")
+MSVC_DEFAULT = "msvc18"
 
 
 def repositoryUpdate(options):
@@ -103,7 +104,6 @@ def runTests(options, env, gitrev, debugSuffix=""):
         status.log_subprocess([ttBin] + fullOpt, env)
         status.log_subprocess([ttBin, "-a", "sumo.gui"] + fullOpt, env)
     status.log_subprocess([ttBin, "-b", env["FILEPREFIX"], "-coll"], env)
-    shutil.copytree(env["SUMO_REPORT"], os.path.join(options.remoteDir, prefix + "report"), dirs_exist_ok=True)
     status.killall((debugSuffix,), BINARIES)
 
 
@@ -119,6 +119,13 @@ def generateCMake(generator, platform, checkOptionalLibs, python):
     status.printLog("Creating solution for %s." % generator)
     status.log_subprocess(["cmake", "../..", "-G", generator, "-A", platform] + cmakeOpt, cwd=buildDir)
     return buildDir
+
+
+def copyResults(files, dirs, dest):
+    for f in files:
+        shutil.copy(f, dest)
+    for d in dirs:
+        shutil.copytree(d, os.path.join(dest, os.path.basename(d)), dirs_exist_ok=True)
 
 
 def main(options, platform="x64"):
@@ -152,7 +159,7 @@ def main(options, platform="x64"):
         cpack_license_rtf = os.path.join(SUMO_HOME, "build_config", "wix", "License.rtf")
     status.log_subprocess(["cmake", "--install", "."], cwd=buildDir)
     plat = platform.lower().replace("x", "win")
-    if options.msvc_version != "msvc16":
+    if options.msvc_version != MSVC_DEFAULT:
         plat += options.msvc_version
     for d in glob.glob(os.path.join(buildDir, "sumo-*")):
         if os.path.isdir(d):
@@ -214,16 +221,15 @@ def main(options, platform="x64"):
     runTests(options, env, gitrev)
     with open(statusLog, 'w') as log:
         status.printStatus(makeLog, makeAllLog, env["SMTP_SERVER"], log, testLog=testLog)
-    for f in (makeLog, makeAllLog, statusLog, testLog):
-        shutil.copy(f, options.remoteDir)
+    copyResults((makeLog, makeAllLog, statusLog, testLog),
+                [env["SUMO_REPORT"]] if options.tests else [], options.remoteDir)
     if not options.x64only:
         debug_handler = status.set_rotating_log(testDebugLog, log_handler)
         status.printLog("Running debug tests.")
         runTests(options, env, gitrev, "D")
         with open(prefix + "Dstatus.log", 'w') as log:
             status.printStatus(makeAllLog, testDebugLog, env["SMTP_SERVER"], log, testLog=testDebugLog)
-        for f in (testDebugLog, log.name):
-            shutil.copy(f, options.remoteDir)
+        copyResults((testDebugLog, log.name), [env["SUMO_REPORT"]] if options.tests else [], options.remoteDir)
 
 
 if __name__ == "__main__":
@@ -238,7 +244,7 @@ if __name__ == "__main__":
     optParser.add_option("-x", "--x64only", action="store_true",
                          default=False, help="skip debug build")
     optParser.add_option("-p", "--python", help="path to python interpreter to use")
-    optParser.add_option("--msvc-version", default="msvc18",
+    optParser.add_option("--msvc-version", default=MSVC_DEFAULT,
                          help="Visual Studio version to use (either msvc16 or msvc18)")
     optParser.add_option("-u", "--repositories", default="git",
                          help="repositories to update")
