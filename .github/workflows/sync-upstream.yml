@@ -57,7 +57,7 @@ jobs:
         id: merge_step
         run: |
           echo "Attempting merge from upstream/main..."
-          if git merge --no-edit upstream/main; then
+          if git merge -m "Merge remote-tracking branch 'upstream/main' [skip ci]" upstream/main; then
             echo "merge_status=success" >> $GITHUB_OUTPUT
             echo "Successfully merged upstream changes."
           else
