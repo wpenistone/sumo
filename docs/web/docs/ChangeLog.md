@@ -31,6 +31,7 @@ title: ChangeLog
   - Fixed crash when trying to render a long partial vehicle that has already left the simulation (sublane) #18271
 
 - meso
+  - Fixed exaggerated headways when passing short edges #18315 (regression in 1.10.0)
   - Fixed invalid jam dynamics when running with internal links #18131
   - Fixed invalid jam dynamics at short edges #17416
   - Fixed invalid error 'too close too brake' when inserting stop #18163
@@ -38,6 +39,7 @@ title: ChangeLog
   - Fixed right-of-way violation that was causing gridlock in roundabout and exaggerated junction throughput #18258
 
 - netedit
+  - Fixed invalid error when loading additional object defined at lane end #18286 (regression in 1.20.0)
   - Fixed invalid connection shapes after computing the network for the first time #16885 (regression in 1.22.0)
   - The menu function for saving .sumocfg with save-as is working again #18150 (regression in 1.26.0)
   - The button for saving the .sumocfg is now functional again after loading a network #18151 (regression in 1.26.0)
@@ -45,7 +47,7 @@ title: ChangeLog
   - setting "random" as color value for vehicles is now working #18014
   - Fixed display problems when selecting demand elements #17012
   - Vehicle parameters are no longer lost when transforming trip to flow #17333
-  - The now "knows" that it needs to be recomputed after changing netedit processing option #15947
+  - The net "knows" that it needs to be recomputed after changing netedit processing option #15947
   - vehicle stack indicator is now working when defining multiple vehicles-over-route on the same route. #14956
   - stacked vehicle indicator now updates after editing departLane #16517
   - Adding a stop to a route no longer adds it to a flow over that route instead #17020
@@ -77,7 +79,7 @@ title: ChangeLog
 ### Enhancements
 
 - sumo
-  - Added carFollowModel NaSch (Nagel Schreckenberg) #12182 (Thanks to 
+  - Added carFollowModel NaSch (Nagel Schreckenberg) #12182 (Thanks to Jerry Lin)
   - Added option **--slope-centered** to replicate simplified slope computation found in other simulators #18111
   - In carFollowModel 'Rail', curvature is now computed by integrating over a configurable distance (default 100m) to smooth piecewise linear geometry. #18138
   - vehicle types can be initialized with values from another vType by using attribute `refId` #18144
@@ -126,7 +128,6 @@ title: ChangeLog
   - Added inductionLoop attribute `mesoTLS`. Detectors with this attribute can be used as custom detectors for actuated traffic lights (i.e. to register vehicles of a specific type) #18245
   - Option **--queue-output** is now supported. Queue lengths are measured per segment queue based on vehicle entry order and, when **--meso-interpolate-pos** is set, on interpolated positions #18212  - 
   - Added warning when loading a network with multi-modal edges where a risk of miscalculating capacity exists #4113
-  
 
 - tools
   - instantOutToEdgeData.py: added option **--poi-output** to visualize extra values and aid in debugging #18166
@@ -134,7 +135,11 @@ title: ChangeLog
   - edgeDataFromFlow.py: added option **--skip-incomplete** to exclude data from incomplete cross-sections #18182
   - flow2POI.poi: added [new tool](Tools/Detector.md#flow2poipy) for visualizing detector flow #18193
   - randomTrips.py: Now warns when routing personTrips with mode public and without pt input #18006
+  - randomTrips.py: Added option **--return-to-origin** which can be used with **--intermediate** to model return trips. #14817
   - gtfs2pt.py now interprets extended gtfs trip modes. The default interpretation of mode 109 was changed to 'train' as this is by far the more common case. Special cases such as Berlin and Hamburg where 109 is mapped as 'light_rail' in OSM can be handled by setting the new option **--sbahn-is-light-rail** #18292
+  - diffMerge.py: [new tool](Tools/Net.md#diffmergepy) for helping to merge conflicts when trying to integrate two sets of network changes #18096
+  - flowConservation.py: [new tool](Tools/Detector.md#flowconservationpy) to sanity check edgeData around junctions #18183
+  - filterDistricts.py: added option **--min-connections** to filter out sources with to few outgoing edges and sinks with to few incoming edges #10618
 
 ### Miscellaneous
 
@@ -145,6 +150,7 @@ title: ChangeLog
   - SUMO will not build on a plain CentOS7 anymore (but you can still build it there if you update the compiler)
 - Windows builds (nightly and release) now use Visual Studio 2026
 - Removed stationFinder device parameter `maxChargePower`. It was never in use because the quantity in question is already defined by `device.battery.maximumChargeRate` #18275
+- As a consequence of fixing #18131, meso defaults to running with internal links if they are present in the network (which improves accuracy in route length and positioning but slightly reduces simulation speed).
 
 
 ## Version 1.27.1 (25.06.2026) ([downloads](https://sumo.dlr.de/docs/Downloads.php))

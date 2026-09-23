@@ -72,8 +72,7 @@ MELoop::simulate(SUMOTime tMax) {
             myInvalidatedLeaderCars.pop();
         }
         if (!myInvalidatedLeaderCars.empty()) {
-            if (e == myInvalidatedLeaderCars.top()) {
-                myInvalidatedLeaderCars.pop();
+            if (wasInvalidated(e)) {
                 continue;
             }
         }
@@ -81,6 +80,33 @@ MELoop::simulate(SUMOTime tMax) {
         checkCar(e.veh);
         assert(myLeaderCars.empty() || myLeaderCars.top().time >= e.time);
     }
+}
+
+
+bool
+MELoop::wasInvalidated(const LeaderEvent& e) {
+    if (e.time == myInvalidatedLeaderCars.top().time) {
+        // we need to check whether any of the events with the same time
+        // is our current vehicle because the order in which
+        // removeLeaderCar was called is unrelated to the order of addLeaderCar
+        std::vector<LeaderEvent> tmp;
+        bool curInvalid = false;
+        while (!myInvalidatedLeaderCars.empty() && e.time == myInvalidatedLeaderCars.top().time) {
+            if (e == myInvalidatedLeaderCars.top()) {
+                myInvalidatedLeaderCars.pop();
+                curInvalid = true;
+                break;
+            } else {
+                tmp.push_back(myInvalidatedLeaderCars.top());
+                myInvalidatedLeaderCars.pop();
+            }
+        }
+        for (LeaderEvent& e : tmp) {
+            myInvalidatedLeaderCars.push(e);
+        }
+        return curInvalid;
+    }
+    return false;
 }
 
 
@@ -173,7 +199,7 @@ MELoop::checkCar(MEVehicle* veh) {
         if (MSGlobals::gTimeToGridlock > 0) {
             // if teleporting is enabled, make sure we look at the vehicle when the gridlock-time is up
             const SUMOTime recheck = MSGlobals::gTimeToTeleportDisconnected >= 0 ? MIN2(MSGlobals::gTimeToGridlock, MSGlobals::gTimeToTeleportDisconnected) : MSGlobals::gTimeToGridlock;
-            newEventTime = MAX2(MIN2(newEventTime, veh->getBlockTime() + recheck + 1), leaveTime + DELTA_T);
+            newEventTime = MAX2(MIN2(newEventTime, veh->getBlockTime() + recheck + 1), leaveTime + 1);
         }
         veh->setEventTime(newEventTime);
     } else {
