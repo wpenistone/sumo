@@ -166,7 +166,7 @@ MSRoutingEngine::initWeightConstants(const OptionsCont& oc) {
         }
     }
     myDynamicRandomness = oc.getBool("weights.random-factor.dynamic");
-    myHaveExtras = gRoutingPreferences || myPriorityFactor != 0 || gWeightsRandomFactor != 0;
+    myHaveExtras = gRoutingPreferences || myPriorityFactor != 0 || gWeightsRandomFactor != 1;
 }
 
 
@@ -573,7 +573,7 @@ MSRoutingEngine::initRouter(SUMOVehicle* vehicle) {
     const std::string routingAlgorithm = oc.getString("routing-algorithm");
     const bool hasPermissions = MSNet::getInstance()->hasPermissions();
     myBikeSpeeds = oc.getBool("device.rerouting.bike-speeds");
-    myEffortFunc = ((gWeightsRandomFactor != 1 || myPriorityFactor != 0 || myBikeSpeeds || gRoutingPreferences) ? &MSRoutingEngine::getEffortExtra : &MSRoutingEngine::getEffort);
+    myEffortFunc = ((myHaveExtras || myBikeSpeeds) ? &MSRoutingEngine::getEffortExtra : &MSRoutingEngine::getEffort);
 
     SUMOAbstractRouter<MSEdge, SUMOVehicle>* router = nullptr;
     if (routingAlgorithm == "dijkstra") {
