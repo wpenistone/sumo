@@ -149,7 +149,7 @@ public:
                 v[settings.first].permissions = settings.second.first == SVC_UNSPECIFIED ? 0 : settings.second.first;
                 if (settings.second.second != -1) {
                     // end time is known
-                    v[settings.first].end = STEPS2TIME(settings.second.second);
+                    v[settings.first].end = settings.second.second;
                 }
             }
             return v;
@@ -372,6 +372,9 @@ protected:
 
     /// whether this rerouter has loaded parkingReroute definitions
     bool myHaveParkProbs;
+
+    /// @brief whether closed edges with known duration are loaded
+    bool myHaveClosingUntil;
 
     std::set<const MSStoppingPlace*> myBlockedStoppingPlaces;
 
