@@ -65,7 +65,10 @@ try:
                             name = dt._name + "_0"
                         param = None
                         if '"s"' in remainder:
-                            param = {v: "3o_0"}
+                            if dt._name == "meandata":
+                                param = {v: "flow"}
+                            else:
+                                param = {v: "3o_0"}
                         elif '"d"' in remainder:
                             param = {v: 0.}
                         elif '"i"' in remainder:
@@ -88,6 +91,8 @@ try:
                             param = {v: ("tru", 2, ("1si", 0., 0), traci.constants.REQUEST_DRIVINGDIST)}
                         elif '"tou"' in remainder:
                             param = {v: ("tou", 2, (400., 495.), traci.constants.REQUEST_DRIVINGDIST)}
+                        elif '"tss"' in remainder:
+                            param = {v: ("tss", 2, "1si_0", "flow")}
                         try:
                             if dt._name == "simulation":
                                 traci.simulation.subscribe([v], parameters=param)

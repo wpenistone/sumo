@@ -406,6 +406,11 @@ public:
         mySubData = subData;
     }
 
+    const MSEdgeVector& getEdges() const {
+        return myEdges;
+    }
+
+
 protected:
     /** @brief Create an instance of MeanDataValues
      *
@@ -524,6 +529,9 @@ private:
 
     /// @brief time at which init was called();
     SUMOTime myInitTime;
+
+    /// @brief time at which reset() was called
+    SUMOTime myLastResetTime;
 
     /// @brief The corresponding first edges
     MSEdgeVector myEdges;
