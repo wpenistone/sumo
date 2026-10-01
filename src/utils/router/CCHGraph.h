@@ -51,11 +51,15 @@
 #include <utils/common/ToString.h>
 #include <utils/geom/GeoConvHelper.h>
 #include <utils/geom/Position.h>
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
 #include <routingkit/customizable_contraction_hierarchy.h>
 #include <routingkit/nested_dissection.h>
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
 
 // #define CCH_DEBUG
 
@@ -178,7 +182,6 @@ public:
 
         // 3. TAZ member sets (query-time "phantom nodes"): successors for a
         // source connector (entry edges), predecessors for a sink connector.
-        unsigned nTazSrc = 0, nTazSnk = 0;
         for (const E* e : allEdges) {
             if (!isStarConnector(e)) {
                 continue;
@@ -199,11 +202,9 @@ public:
             }
             if (!srcNodes.empty()) {
                 myTazSrcNodes[e] = std::move(srcNodes);
-                nTazSrc++;
             }
             if (!snkNodes.empty()) {
                 myTazSnkNodes[e] = std::move(snkNodes);
-                nTazSnk++;
             }
         }
 
@@ -216,7 +217,7 @@ public:
         std::cout << "CCH: " << nNodes << " road nodes, "
                   << arcCount() << " arcs, "
                   << myCCH.cch_arc_count() << " cch-arcs (fill x" << (double)myCCH.cch_arc_count() / MAX2((unsigned)1, arcCount())
-                  << "), " << nTazSrc<< " TAZ sources, " << nTazSnk << " TAZ sinks." << std::endl;
+                  << "), " << myTazSrcNodes.size() << " TAZ sources, " << myTazSnkNodes.size() << " TAZ sinks." << std::endl;
 #endif
     }
 

@@ -44,6 +44,8 @@ import tracemapper  # noqa
 
 import gtfs2fcd  # noqa
 import gtfs2osm  # noqa
+import gtfsutils  # noqa
+from gtfsutils import OSM2SUMO_MODES, GTFS2OSM_MODES  # noqa
 
 
 def get_options(args=None):
@@ -57,6 +59,8 @@ def get_options(args=None):
                     help="file to write the generated public transport stops and routes to")
     ap.add_argument("--duration", default=10, category="input",
                     type=int, help="minimum time to wait on a stop")
+    ap.add_argument("--write-arrival", action="store_true", default=False, dest="writeArrival",
+                    help="write stop arrival times (estimated from duration if GTFS gives arrival_time equal to departure_time)")  # noqa
     ap.add_argument("--bus-parking", action="store_true", default=False, dest="busParking",
                     help="set parking to true for bus mode")
     ap.add_argument("--bus-stop-length", default=13, category="input", type=float,
@@ -157,7 +161,7 @@ def get_options(args=None):
     if options.distPenalty is None:
         options.distPenalty = 1 if options.stops else 2
     if options.sbahnLR:
-        gtfs2osm.GTFS2OSM_MODES['109'] = 'light_rail'
+        GTFS2OSM_MODES['109'] = 'light_rail'
 
     random.seed(options.seed)
     return options
@@ -190,7 +194,7 @@ def splitNet(options):
         mode = os.path.basename(inp)[:-8]
         if not options.modes or mode in options.modes.split(","):
             netPrefix = os.path.join(options.network_split, flattenPath(getBaseName(options.network)) + '_' + mode)
-            vclass = gtfs2osm.OSM2SUMO_MODES.get(mode)
+            vclass = OSM2SUMO_MODES.get(mode)
             edgeFilter = ["--keep-edges.by-vclass", vclass] if vclass else None
             if edgeFilter:
                 if (os.path.exists(netPrefix + ".net.xml") and
@@ -214,7 +218,7 @@ def traceMap(options, veh2mode, typedNets, fixedStops, stopLookup, invEdgeMap, r
     routes = collections.OrderedDict()
     for mode in sorted(typedNets.keys()):
         netPrefix = typedNets[mode][1]
-        vclass = gtfs2osm.OSM2SUMO_MODES.get(mode)
+        vclass = OSM2SUMO_MODES.get(mode)
         if options.verbose:
             print("mapping", mode)
         net = sumolib.net.readNet(netPrefix + ".net.xml", maxcache=options.maxcache)
@@ -327,7 +331,7 @@ def map_stops(options, net, typedNets, routes, rout, edgeMap, fixedStops, stopLo
     for inp in sorted(glob.glob(os.path.join(options.fcd, "*.fcd.xml"))):
         mode = os.path.basename(inp)[:-8]
         netPrefix = typedNets[mode][1]
-        vclass = gtfs2osm.OSM2SUMO_MODES.get(mode)
+        vclass = OSM2SUMO_MODES.get(mode)
         typedNetFile = netPrefix + ".net.xml"
         if not os.path.exists(typedNetFile):
             print("Warning! No net", typedNetFile, file=sys.stderr)
@@ -457,8 +461,8 @@ def map_stops(options, net, typedNets, routes, rout, edgeMap, fixedStops, stopLo
                                     bestDist = dist
                                     result = (lane.getID(), float(stopObj.startPos), endPos)
                 if result is None and candidate_edges:
-                    result = gtfs2osm.getBestLane(net, veh.x, veh.y, options.radius, stopLength, options.center_stops,
-                                                  candidate_edges, gtfs2osm.OSM2SUMO_MODES[mode],
+                    result = gtfsutils.getBestLane(net, veh.x, veh.y, options.radius, stopLength, options.center_stops,
+                                                  candidate_edges, OSM2SUMO_MODES[mode],
                                                   (route[lastIndex], lastPos))
                     if options.warn_unmapped and result is not None and stopLookup.hasCandidates():
                         print("Warning! Adding stop at index %s that was not loaded for %s." % (
@@ -498,7 +502,7 @@ def map_stops(options, net, typedNets, routes, rout, edgeMap, fixedStops, stopLo
                     print("Warning: GTFS stop_id '%s' occurs on lane '%s' and '%s', assigning new id '%s'." % (
                         oldID, stopID2Lane[oldID], laneID, stop), file=sys.stderr)
                 if not options.skip_access:
-                    childs += gtfs2osm.getAccess(net, veh.x, veh.y, options.access_radius, laneID)
+                    childs += gtfsutils.getAccess(net, veh.x, veh.y, options.access_radius, laneID)
                 if not options.overtake_right:
                     lane = net.getLane(laneID)
                     idx = lane.getIndex()
@@ -609,10 +613,10 @@ def main(options):
     if legacy_osm_routes:
         # Import PT from GTFS and OSM routes
         gtfsZip = zipfile.ZipFile(sumolib.openz(options.gtfs, mode="rb", tryGZip=False, printErrors=True))
-        routes, trips_on_day, shapes, stops, stop_times = gtfs2osm.import_gtfs(options, gtfsZip)
+        routes, trips_on_day, shapes, stops, stop_times = gtfsutils.import_gtfs(options, gtfsZip)
         gtfsZip.fp.close()
         if options.mergedCSVOutput:
-            full_data_merged = gtfs2fcd.get_merged_data(options)
+            full_data_merged = gtfsutils.get_merged_data(options)
             full_data_merged.sort_values(by=['trip_id', 'stop_sequence'], inplace=True)
             full_data_merged.to_csv(options.mergedCSVOutput, sep=";", index=False)
 
@@ -622,7 +626,7 @@ def main(options):
             print('Warning: GTFS shapes file not found! Continuing mapping without shapes.', file=sys.stderr)
         (gtfs_data, trip_list,
             filtered_stops,
-            shapes, shapes_dict) = gtfs2osm.filter_gtfs(options, routes,
+            shapes, shapes_dict) = gtfsutils.filter_gtfs(options, routes,
                                                         trips_on_day, shapes,
                                                         stops, stop_times)
 
