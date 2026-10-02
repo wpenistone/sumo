@@ -100,8 +100,13 @@ MSPModel_NonInteracting::MoveToNextEdge::execute(SUMOTime currentTime) {
         myModel->registerArrived();
         return 0;
     }
+    SUMOTime nextDuration = static_cast<PState*>(myParent.getPState())->computeDuration(old, myParent, currentTime);
+    // first compute position on the new edge
     myParent.activateEntryReminders(myTransportable);
-    return static_cast<PState*>(myParent.getPState())->computeDuration(old, myParent, currentTime);
+    if (myTransportable == nullptr) {
+        return 0; // descheduled by rerouter on new edge
+    }
+    return nextDuration;
 }
 
 

@@ -11,7 +11,7 @@
 # SPDX-License-Identifier: EPL-2.0 OR GPL-2.0-or-later
 
 # @file    gtfsutils.py
-# @author  Jakob Erdmann Armellini
+# @author  Jakob Erdmann
 # @date    2026-10-01
 
 """
@@ -20,13 +20,8 @@ Helper functions for gtfs2pt.py
 
 import os
 import sys
-import subprocess
 import datetime
 import time
-import math
-import io
-import re
-from collections import defaultdict
 import hashlib
 
 # from pprint import pprint
@@ -37,8 +32,7 @@ pd.options.mode.chained_assignment = None  # default='warn'
 
 sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
 import sumolib  # noqa
-from sumolib.xml import parse_fast_nested  # noqa
-from sumolib.miscutils import benchmark, parseTime, humanReadableTime  # noqa
+from sumolib.miscutils import benchmark  # noqa
 
 # ----------------------- gtfs, osm and sumo modes ----------------------------
 OSM2SUMO_MODES = {
@@ -105,8 +99,9 @@ for i in range(700, 717):
 for i in range(900, 907):
     GTFS2OSM_MODES[str(i)] = 'tram'
 
-def md5hash(s):
-    return hashlib.md5(s.encode('utf-8')).hexdigest()
+
+def sha256hash(s):
+    return hashlib.sha256(s.encode('utf-8')).hexdigest()
 
 
 @benchmark
@@ -217,7 +212,7 @@ def discover_direction(routes, trips, stop_times):
     # create a direction_id identifier from the stop sequence
     enhancedStopTimes = pd.merge(stop_times, pd.merge(trips, routes, on='route_id', how='left'), on='trip_id')
     groupedStopTimes = enhancedStopTimes.groupby(["trip_id"], as_index=False).agg({'stop_id': ' '.join})
-    groupedStopTimes['direction_id'] = groupedStopTimes['stop_id'].apply(md5hash)
+    groupedStopTimes['direction_id'] = groupedStopTimes['stop_id'].apply(sha256hash)
     # copy the direction_id back to the trips file / join the DataFrame
     return pd.merge(trips, groupedStopTimes[['trip_id', 'direction_id']], on='trip_id', how='left')
 
@@ -367,6 +362,7 @@ def write_vtypes(options, seen=None):
                                (osm_type, sumo_class))
             vout.write(u'</additional>\n')
 
+
 def time2sec(s):
     t = s.split(":")
     return int(t[0]) * 3600 + int(t[1]) * 60 + int(t[2])
@@ -469,3 +465,28 @@ def getAccess(net, lon, lat, radius, lane_id, max_access=10):
                 if len(access) == max_access:
                     break
     return access
+
+
+def loadGTFS(options):
+    if options.mergedCSV:
+        # Need everything except few columns as strings. The exceptions are:
+        # - `arrival_time` and `departure_time` have to be integers,
+        # - `stop_lat`, `stop_lon`, and `stop_sequence` have to be floats
+        full_data_merged = pd.read_csv(options.mergedCSV, sep=";",
+                                       keep_default_na=False,
+                                       dtype=str)
+        full_data_merged['arrival_time'] = full_data_merged['arrival_time'].astype(int)
+        full_data_merged['departure_time'] = full_data_merged['departure_time'].astype(int)
+        full_data_merged['stop_lat'] = full_data_merged['stop_lat'].astype(float)
+        full_data_merged['stop_lon'] = full_data_merged['stop_lon'].astype(float)
+        full_data_merged['stop_sequence'] = full_data_merged['stop_sequence'].astype(float)
+        if 'block_id' not in full_data_merged.columns:
+            options.joinBlocks = False
+    else:
+        full_data_merged = get_merged_data(options)
+    if options.mergedCSVOutput:
+        full_data_merged.sort_values(by=['trip_id', 'stop_sequence'], inplace=True)
+        full_data_merged.to_csv(options.mergedCSVOutput, sep=";", index=False)
+    if options.joinBlocks and not full_data_merged.empty:
+        full_data_merged = joinBlocks(full_data_merged)
+    return full_data_merged

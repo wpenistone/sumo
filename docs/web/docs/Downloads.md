@@ -120,27 +120,6 @@ Make sure to have Python and XQuartz installed on your Mac.
 You can also build SUMO by following these instructions [here](Installing/MacOS_Build.md).
 
 
-### Homebrew
-
-You can also read the Homebrew-based installation guide [here](Installing/index.md#macos) or follow the [build instructions](Installing/MacOS_Build.md).
-The usage of the homebrew bottles is discouraged.
-
-!!! caution "Important notice"
-    We no longer maintain the installation via Homebrew. It may be used to install older versions, but support is not provided. Please use the installer or build SUMO yourself.
-
-***If you used the installer, this step is not needed!***
-
-In order to have a more native feel on macOS, we provide some application launchers (icons / shortcuts). These launchers ***work with all versions of SUMO and do not need to be updated***.
-
-<ul>
-<li><a class="no-arrow-link" href="https://sumo.dlr.de/daily/SUMO_launchers.dmg">Download SUMO launchers</a><?php getInfo("SUMO_launchers.dmg","d",false);?></li>
-</ul>
-
-These launchers allow you to select **sumo-gui** as the default application to open `.sumocfg` files on macOS, and even add **sumo-gui**, **netedit** and the **OSM Web Wizard** to the dock.
-
-!!! caution "Important notice"
-    In order to use the launchers, make sure you have installed SUMO beforehand (any version) and have set the [SUMO_HOME](Basics/Basic_Computer_Skills.md#sumo_home) environment variable.
-
 ## Sources
 
 Download the sources, examples, and CMake-files for creating Visual Studio
@@ -312,11 +291,36 @@ switch($type){
 $file = $_SERVER['DOCUMENT_ROOT']. $file;
 if(file_exists($file)){
 $size = "<span class='badge badge-pill badge-secondary' style='margin-left:5px;'>" . round(((filesize($file))/1048576),1) . " MB" . "</span>";
+$checksumBtn = "";
+$modal = "";
+$shaFile = $file . ".sha256";
+if(file_exists($shaFile)){
+  $shaContent = trim(file_get_contents($shaFile));
+  $parts = preg_split('/\s+/', $shaContent);
+  $checksum = !empty($parts) ? $parts[0] : $shaContent;
+  $modalId = "checksum_" . md5($file);
+  $checksumBtn = "<button type='button' class='btn btn-sm btn-xs btn-outline-secondary ml-2' data-toggle='modal' data-target='#" . $modalId . "' title='View SHA256 checksum'>Checksum</button>";
+  $modal = "<div class='modal fade' id='" . $modalId . "' tabindex='-1' role='dialog' aria-labelledby='" . $modalId . "Label' aria-hidden='true'>"
+         . "<div class='modal-dialog modal-dialog-centered' role='document'>"
+         . "<div class='modal-content'>"
+         . "<div class='modal-header'>"
+         . "<h5 class='modal-title' id='" . $modalId . "Label'>SHA256 Checksum</h5>"
+         . "<button type='button' class='close' data-dismiss='modal' aria-label='Close'><span aria-hidden='true'>&times;</span></button>"
+         . "</div>"
+         . "<div class='modal-body' style='color: #495057 !important;'>"
+         . "<p><strong>File:</strong> " . htmlspecialchars($fname) . "</p>"
+         . "<p><strong>Checksum (SHA256):</strong></p>"
+         . "<div class='codehilite'><pre><span></span><code class='hljs'>" . htmlspecialchars($checksum) . "</code></pre></div>"
+         . "</div>"
+         . "</div>"
+         . "</div>"
+         . "</div>";
+}
 if ($nightly) {
   $fileDate = "<span class='badge badge-pill badge-light' style='margin-left:5px;'>" . date("F d Y H:i:s", filemtime($file)) . " UTC</span>";
-  echo $fileDate . $size;
+  echo $fileDate . $size . $checksumBtn . $modal;
 } else {
-  echo $size;
+  echo $size . $checksumBtn . $modal;
 }
 }}
 
