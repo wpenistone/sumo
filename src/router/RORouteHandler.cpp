@@ -900,51 +900,13 @@ RORouteHandler::closeTrip() {
 
 const SUMOVehicleParameter::Stop*
 RORouteHandler::retrieveStoppingPlace(const SUMOSAXAttributes& attrs, const std::string& errorSuffix, std::string& id, const SUMOVehicleParameter::Stop* stopParam) {
-    // dummy stop parameter to hold the attributes
-    SUMOVehicleParameter::Stop stop;
-    if (stopParam != nullptr) {
-        stop = *stopParam;
-    } else {
-        bool ok = true;
-        stop.busstop = attrs.getOpt<std::string>(SUMO_ATTR_BUS_STOP, nullptr, ok, "");
-        stop.busstop = attrs.getOpt<std::string>(SUMO_ATTR_TRAIN_STOP, nullptr, ok, stop.busstop); // alias
-        stop.chargingStation = attrs.getOpt<std::string>(SUMO_ATTR_CHARGING_STATION, nullptr, ok, "");
-        stop.overheadWireSegment = attrs.getOpt<std::string>(SUMO_ATTR_OVERHEAD_WIRE_SEGMENT, nullptr, ok, "");
-        stop.containerstop = attrs.getOpt<std::string>(SUMO_ATTR_CONTAINER_STOP, nullptr, ok, "");
-        stop.parkingarea = attrs.getOpt<std::string>(SUMO_ATTR_PARKING_AREA, nullptr, ok, "");
-    }
     const SUMOVehicleParameter::Stop* toStop = nullptr;
-    if (stop.busstop != "") {
-        toStop = myNet.getStoppingPlace(stop.busstop, SUMO_TAG_BUS_STOP);
-        id = stop.busstop;
+    SumoXMLTag tag = SUMO_TAG_NOTHING;
+    SUMOVehicleParserHelper::parseStopTag(attrs, stopParam, tag, id);
+    if (tag != SUMO_TAG_NOTHING) {
+        toStop = myNet.getStoppingPlace(id, tag);
         if (toStop == nullptr) {
-            WRITE_ERROR("The busStop '" + stop.busstop + "' is not known" + errorSuffix);
-        }
-    } else if (stop.containerstop != "") {
-        toStop = myNet.getStoppingPlace(stop.containerstop, SUMO_TAG_CONTAINER_STOP);
-        id = stop.containerstop;
-        if (toStop == nullptr) {
-            WRITE_ERROR("The containerStop '" + stop.containerstop + "' is not known" + errorSuffix);
-        }
-    } else if (stop.parkingarea != "") {
-        toStop = myNet.getStoppingPlace(stop.parkingarea, SUMO_TAG_PARKING_AREA);
-        id = stop.parkingarea;
-        if (toStop == nullptr) {
-            WRITE_ERROR("The parkingArea '" + stop.parkingarea + "' is not known" + errorSuffix);
-        }
-    } else if (stop.chargingStation != "") {
-        // ok, we have a charging station
-        toStop = myNet.getStoppingPlace(stop.chargingStation, SUMO_TAG_CHARGING_STATION);
-        id = stop.chargingStation;
-        if (toStop == nullptr) {
-            WRITE_ERROR("The chargingStation '" + stop.chargingStation + "' is not known" + errorSuffix);
-        }
-    } else if (stop.overheadWireSegment != "") {
-        // ok, we have an overhead wire segment
-        toStop = myNet.getStoppingPlace(stop.overheadWireSegment, SUMO_TAG_OVERHEAD_WIRE_SEGMENT);
-        id = stop.overheadWireSegment;
-        if (toStop == nullptr) {
-            WRITE_ERROR("The overhead wire segment '" + stop.overheadWireSegment + "' is not known" + errorSuffix);
+            myErrorOutput->inform(TLF("The % '%' is not known%", toString(tag), id, errorSuffix));
         }
     }
     return toStop;
