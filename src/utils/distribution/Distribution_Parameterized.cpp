@@ -33,6 +33,11 @@
 // ===========================================================================
 // method definitions
 // ===========================================================================
+
+Distribution_Parameterized::Distribution_Parameterized() :
+    Distribution("") {
+}
+
 /// @brief Constructor for any temporary distribution parsed directly from the description
 Distribution_Parameterized::Distribution_Parameterized(const std::string& description) :
     Distribution("") {
@@ -67,10 +72,10 @@ Distribution_Parameterized::parse(const std::string& description, const bool har
         if (distName == "norm" || distName == "normc") {
             const std::vector<std::string> params = StringTokenizer(description.substr(distName.size() + 1, description.size() - distName.size() - 2), ',').getVector();
             myParameter.resize(params.size());
-            std::transform(params.begin(), params.end(), myParameter.begin(), StringUtils::toDouble);
+            std::transform(params.begin(), params.end(), myParameter.begin(), StringUtils::toDoubleAllowTime);
             setID(distName);
         } else {
-            myParameter[0] = StringUtils::toDouble(description);
+            myParameter[0] = StringUtils::toDoubleAllowTime(description);
         }
         if (myParameter.size() == 1) {
             myParameter.push_back(0.);
@@ -88,16 +93,15 @@ Distribution_Parameterized::parse(const std::string& description, const bool har
 
 
 bool
-Distribution_Parameterized::isValidDescription(const std::string& description) {
+Distribution_Parameterized::isValidDescription(const std::string& description, std::string& error) {
     try {
         Distribution_Parameterized dummy(description);
-        const std::string error = dummy.isValid();
+        error = dummy.isValid();
         if (error == "") {
             return true;
         }
-        WRITE_ERROR(error);
     } catch (...) {
-        WRITE_ERROR(TL("Invalid format of distribution parameterized"));
+        error = TL("Invalid format of distribution parameterized");
     }
     return false;
 }
@@ -105,6 +109,9 @@ Distribution_Parameterized::isValidDescription(const std::string& description) {
 
 double
 Distribution_Parameterized::sample(SumoRNG* which) const {
+    if (myParameter.empty()) {
+        throw ProcessError(TL("Attempted to sample from dummy distribution"));
+    }
     if (myParameter[1] <= 0.) {
         return myParameter[0];
     }
@@ -122,6 +129,9 @@ Distribution_Parameterized::sample(SumoRNG* which) const {
 
 double
 Distribution_Parameterized::getMax() const {
+    if (myParameter.empty()) {
+        return std::numeric_limits<double>::infinity();
+    }
     if (myParameter[1] <= 0.) {
         return myParameter[0];
     }
@@ -131,6 +141,9 @@ Distribution_Parameterized::getMax() const {
 
 double
 Distribution_Parameterized::getMin() const {
+    if (myParameter.empty()) {
+        return -std::numeric_limits<double>::infinity();
+    }
     if (myParameter[1] <= 0.) {
         return myParameter[0];
     }
@@ -140,13 +153,18 @@ Distribution_Parameterized::getMin() const {
 
 void
 Distribution_Parameterized::setParameter(const int index, const double value) {
+    if (index >= (int)myParameter.size()) {
+        throw ProcessError(TLF("Attempted to set parameter index % of distribut '%' with % parameters", index, myID, myParameter.size()));
+    }
     myParameter[index] = value;
 }
 
 
 std::string
 Distribution_Parameterized::toStr(std::streamsize accuracy) const {
-    if (myParameter[1] < 0) {
+    if (myParameter.empty()) {
+        return "";
+    } else if (myParameter[1] < 0) {
         // only write simple speedFactor
         return toString(myParameter[0]);
     } else {
@@ -159,7 +177,9 @@ Distribution_Parameterized::toStr(std::streamsize accuracy) const {
 
 const std::string
 Distribution_Parameterized::isValid() const {
-    if (myParameter[1] > 0.) {
+    if (myParameter.empty()) {
+        return "Dummy Distribution (invalid)";
+    } else if (myParameter.size() >= 2 && myParameter[1] > 0.) {
         if (getMin() > getMax()) {
             return TLF("minimum value % larger than maximum %", getMin(), getMax());
         }
