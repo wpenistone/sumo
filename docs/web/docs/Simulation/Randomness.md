@@ -128,6 +128,20 @@ The lateral offset at departure will only affect simulation behavior when using 
 # Lateral Variation
 When setting the lane change mode attribute `lcSigma` to a positive value, Vehicles will exhibit some random lateral drift.
 
+# Specifying Distributed Input values
+
+Several attributes and options support a syntax where they can be defined either as constants ("3.14") or as distribution strings. The following distributions are supported:
+
+- 'norm(a,b)': normal distribution with expected value *a* and standard deviation *b*
+- 'normc(a,b,c,d)': normal distribution with expected value *a* and standard deviation *b* that truncates it's results to the range [c, d]
+
+Distribution strings are supported in the following locations:
+
+- `<vType>` attribute ['speedFactor'](../Definition_of_Vehicles,_Vehicle_Types,_and_Routes.md#speed_distributions)
+- `<stop>` attribute ['duration'](../Definition_of_Vehicles%2C_Vehicle_Types%2C_and_Routes.md#stops_and_waypoints)
+- [netgenerate](../netgenerate.md) options **--perturb-x**, **--perturb-y** and **--perturb-z**
+- all options and [Generic Parameter keys](GenericParameters.md) for configuring [devices](../Definition_of_Vehicles%2C_Vehicle_Types%2C_and_Routes.md#devices)
+
 # Further sources of randomness
 
 - The tool [randomTrips.py](../Tools/Trip.md#randomtripspy) allows generating traffic between random edges. It also supports randomizing arrival rates.
@@ -154,5 +168,4 @@ The following differences are either due to bugs or hard-to-solve problems in li
 ### Platform differences
 
 - **Differences in generated networks by platform**: When importing network data with geo-coordinates, the transformation to x,y (Cartesian) coordinates are performed by the [Proj](https://proj.org/). This library has differences from one version to the next and different platforms usually provide different library versions. The same problem may also manifest when using TraCI-functions for coordinate transformations.
-- **Non-deterministic vehicle routing with options --device.rerouting.threads --weights.random-factor** (Issue #10292)
 - **Different Simulation behavior due to using the `log` function**. Observed differences for the EIDM-Model (Issue #8921) and also for Simulations with the DriverState-device. Could in principe also affect the Wiedemann-Model and the ToC-device.
