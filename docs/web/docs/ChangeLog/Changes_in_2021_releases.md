@@ -4,6 +4,8 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
 
 ## Version 1.11.0 (23.11.2021)
 
+[Downloads](https://sumo.dlr.de/releases/1.11.0/)
+
 ### Bugfixes
 
 - simulation
@@ -356,6 +358,8 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
 
 ## Version 1.10.0 (17.08.2021)
 
+[Downloads](https://sumo.dlr.de/releases/1.10.0/)
+
 ### Bugfixes
 
 - simulation
@@ -510,6 +514,8 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
 
 ## Version 1.9.2 (18.05.2021)
 
+[Downloads](https://sumo.dlr.de/releases/1.9.2/)
+
 ### Bugfixes
 
 - simulation
@@ -553,6 +559,8 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
 
 
 ## Version 1.9.1 (04.05.2021)
+
+[Downloads](https://sumo.dlr.de/releases/1.9.1/)
 
 ### Bugfixes
 - Simulation
@@ -635,6 +643,8 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
 
 ## Version 1.9.0 (13.04.2021)
 
+[Downloads](https://sumo.dlr.de/releases/1.9.0/)
+
 ### Bugfixes
 - Simulation
    Option **--xml-validation.net** is now working again. Issue #8107 (regression in 1.5.0)
@@ -686,7 +696,7 @@ title: Changes in the 2021 releases (versions 1.9.0, 1.9.1, 1.9.2, 1.10.0 and 1.
   - Fixed crash when using network property dialog in meso. Issue #7998
   - Person drawing style "as circles" is now drawing circles as intended. Issue #8130
   - Fixed crash when opening person parameter dialog for a person with depart="triggered". Issue #8164
-  - Default coloring now indicates lanes that allow rails and busses. #8315
+  - Default coloring now indicates lanes that allow rails and buses. #8315
 
 - netedit
   - Fixed invalid E2 detector shape Issue #7895 (Regression in 1.7.0)

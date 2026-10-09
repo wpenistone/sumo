@@ -4,6 +4,8 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
 
 ## Version 1.1.0 (18.12.2018)
 
+[Downloads](https://sumo.dlr.de/releases/1.1.0/)
+
 ### Bugfixes
 
 - Simulation
@@ -178,6 +180,8 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
 
 ## Version 1.0.1 (18.09.2018)
 
+[Downloads](https://sumo.dlr.de/releases/1.0.1/)
+
 ### Bugfixes
 
 - Simulation
@@ -261,6 +265,8 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
 
 ## Version 1.0.0 (04.09.2018)
 
+[Downloads](https://sumo.dlr.de/releases/1.0.0/)
+
 ### Bugfixes
 
 - Simulation
@@ -274,7 +280,7 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
     *.sbx* format. Issue #3787
   - Fixed invalid vehicle counts by E2-detector related to
     lane-changing. Issue #3791
-  - Fixed invalid vehicle counts by E3-detector related to re-using
+  - Fixed invalid vehicle counts by E3-detector related to reusing
     vehicle pointers Issue #3108, Issue #4079
   - Fixed bug that was causing invalid slowdown while passing an
     intersection. Issue #3861
@@ -468,7 +474,7 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
     output of safety related quantities. Issue #2669, Issue #4119
   - 'Smoothed' emergency braking Issue #4116
   - Added an initial version of a [driver state
-    device](../Driver_State.md) for modelling imperfect
+    device](../Driver_State.md) for modeling imperfect
     driving.
   - Added an initial version of a [transition of control
     model](../ToC_Device.md).
@@ -530,7 +536,7 @@ title: Changes in the 2018 releases (versions 1.0.0, 1.0.1 and 1.1.0)
     (hotkey 'w'). Thanks to Mirko Barthauer for the contribution. Issue #3850
   - Added virtual attribute to identify [bidirectional rail edge
     pairs](../Simulation/Railways.md#bidirectional_track_usage). Issue #3720
-  - Added option to modify the visualisation of [bidirectional rail
+  - Added option to modify the visualization of [bidirectional rail
     edge
     pairs](../Simulation/Railways.md#bidirectional_track_usage)
     (*spread superposed*) Issue #3720

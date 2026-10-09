@@ -4,6 +4,8 @@ title: Changes in the 2020 releases (versions 1.5.0, 1.6.0, 1.7.0 and 1.8.0)
 
 ## Version 1.8.0 (02.12.2020)
 
+[Downloads](https://sumo.dlr.de/releases/1.8.0/)
+
 ### Bugfixes
 - simulation
   - Fixed automatic ride sharing for personTrips between the same origin and destination that did not declare a common 'group'. By default, rides are not shared. Automatic ride sharing for personTrips and rides can be enabled by setting option **--persontrip.default.group STR** to an arbitrary value. Issue #7559, #7560
@@ -182,6 +184,8 @@ title: Changes in the 2020 releases (versions 1.5.0, 1.6.0, 1.7.0 and 1.8.0)
 
 
 ## Version 1.7.0 (09.09.2020)
+
+[Downloads](https://sumo.dlr.de/releases/1.7.0/)
 
 ### Bugfixes
 - Simulation
@@ -423,6 +427,8 @@ title: Changes in the 2020 releases (versions 1.5.0, 1.6.0, 1.7.0 and 1.8.0)
 
 ## Version 1.6.0 (28.04.2020)
 
+[Downloads](https://sumo.dlr.de/releases/1.6.0/)
+
 ### Bugfixes
 
 - Simulation
@@ -585,6 +591,8 @@ title: Changes in the 2020 releases (versions 1.5.0, 1.6.0, 1.7.0 and 1.8.0)
 
 ## Version 1.5.0 (11.02.2020)
 
+[Downloads](https://sumo.dlr.de/releases/1.5.0/)
+
 ### Bugfixes
 - Simulation
   - Fixed bug that could cause the simulation to freeze when vehicles approach a right_before_left junction from all directions simultaneously. Issue #6471 (regression in 1.4)
@@ -598,7 +606,7 @@ title: Changes in the 2020 releases (versions 1.5.0, 1.6.0, 1.7.0 and 1.8.0)
   - Fixed invalid error when loading a network where edge-IDs have non-ascii characters. Issue #6597
 
 - sumo-gui
-  - Fixed visualisation of containers. Issue #6426
+  - Fixed visualization of containers. Issue #6426
   - Text setting options 'constant size' and 'background' are now working for 'link junction index' and 'link tls index'. Issue #6376
   - Traffic light parameter 'running duration' is now correct when switching phases via TraCI. Issue #6520
   - Fixed bug where Locator-Dialog 'Center' button remained disabled after successfully locating objects via substring filtering. Issue #6593

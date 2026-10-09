@@ -4,6 +4,8 @@ title: Changes in the 2019 releases (versions 1.2.0, 1.3.0, 1.3.1 and 1.4.0)
 
 ## Version 1.4.0 (10.12.2019)
 
+[Downloads](https://sumo.dlr.de/releases/1.4.0/)
+
 ### Bugfixes
 
 - Simulation
@@ -148,6 +150,8 @@ title: Changes in the 2019 releases (versions 1.2.0, 1.3.0, 1.3.1 and 1.4.0)
 
 ## Version 1.3.1 (27.08.2019)
 
+[Downloads](https://sumo.dlr.de/releases/1.3.1/)
+
 ### Bugfixes
 
 - netedit
@@ -195,6 +199,8 @@ title: Changes in the 2019 releases (versions 1.2.0, 1.3.0, 1.3.1 and 1.4.0)
   - removed doxygen docu from the distribution
 
 ## Version 1.3.0 (20.08.2019)
+
+[Downloads](https://sumo.dlr.de/releases/1.3.0/)
 
 ### Bugfixes
 
@@ -411,6 +417,8 @@ title: Changes in the 2019 releases (versions 1.2.0, 1.3.0, 1.3.1 and 1.4.0)
 
 ## Version 1.2.0 (16.04.2019)
 
+[Downloads](https://sumo.dlr.de/releases/1.2.0/)
+
 ### Bugfixes
 
 - Simulation
@@ -541,7 +549,7 @@ title: Changes in the 2019 releases (versions 1.2.0, 1.3.0, 1.3.1 and 1.4.0)
   - When *show-detectors* is set for actuated traffic lights, the detector outline will switch to green for detectors that are used to control the active phase. Issue #5168
   - Added option **--tls.actuated.show-detectors** {{DT_BOOL}} to set the default for actuated detector visibility.
   - Vehicles with guiShape *truck/trailer* and *truck/semitrailer* now bend when cornering. Issue #3100
-  - Added vehicle route visualisation *Show Future Route* to the vehicle context menu. This only shows the remaining portion of the route.
+  - Added vehicle route visualization *Show Future Route* to the vehicle context menu. This only shows the remaining portion of the route.
   - Persons riding in a vehicle now have distinct seat position. Issue #1628
   - Persons waiting at a busStop can now wait in multiple rows according the specified stop length and personCapacity.
   - Added person drawing style *circles*
