@@ -59,7 +59,7 @@ except ImportError:
 import sumolib
 from . import lane, edge, netshiftadaptor, node, connection, roundabout  # noqa
 from .connection import Connection
-from sumolib.miscutils import intIfPossible
+from sumolib.miscutils import intIfPossible, openz
 
 
 class TLS:
@@ -606,7 +606,6 @@ class Net:
                     minPath = viaPath
         return minPath, minInternalCost
 
-
     def getOptimalPath(self, fromEdge, toEdge, fastest=False, maxCost=1e400, vClass=None, reversalPenalty=0,
                        includeFromToCost=True, withInternal=False, ignoreDirection=False,
                        fromPos=None, toPos=None, preferences={}):
@@ -1118,6 +1117,17 @@ def lane2edge(laneID):
 
 def lane2index(laneID):
     return int(laneID[laneID.rfind("_") + 1:])
+
+
+def hasInternal(filename):
+    with openz(filename) as f:
+        for line in f:
+            if '<edge id="' in line:
+                if '<edge id=":' in line:
+                    return True
+                else:
+                    return False
+    return False
 
 
 def readNet(filename, **others):
