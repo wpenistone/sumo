@@ -59,7 +59,7 @@ public:
         myWrittenDeadlocks.clear();
     }
 
-    void addWaitRelation(const SUMOVehicle* waits, const MSRailSignal* rs, const SUMOVehicle* reason, MSRailSignalConstraint* constraint = nullptr, bool loadedDeadlock = false);
+    void addWaitRelation(const SUMOVehicle* waits, const MSRailSignal* rs, const SUMOVehicle* reason, MSRailSignalConstraint* constraint = nullptr);
 
     void addDrivewayFollower(const MSDriveWay* dw, const MSDriveWay* dw2);
 
@@ -69,8 +69,8 @@ public:
     /// @brief whether there is a circle in the waiting-for relationships that contains the given vehicle
     bool haveDeadlock(const SUMOVehicle* veh) const;
 
-    void addDeadlockCheck(std::vector<const MSRailSignal*> signals);
-    void addDeadlockRoute(const ConstMSEdgeVector& edges);
+    void loadDeadlockCheck(std::vector<const MSRailSignal*> signals);
+    void loadDeadlockRoute(const ConstMSEdgeVector& edges);
 
     /** @brief Called if a vehicle changes its state
      * @param[in] vehicle The vehicle which changed its state
@@ -133,14 +133,12 @@ private:
     std::set<const MSEdge*> myUsedEdges;
 
     struct WaitRelation {
-        WaitRelation(const MSRailSignal* _railSignal = nullptr, const SUMOVehicle* _foe = nullptr, MSRailSignalConstraint* _constraint = nullptr, bool _loadedDeadlock = false) :
-            railSignal(_railSignal), foe(_foe), constraint(_constraint), loadedDeadlock(_loadedDeadlock) {}
+        WaitRelation(const MSRailSignal* _railSignal = nullptr, const SUMOVehicle* _foe = nullptr, MSRailSignalConstraint* _constraint = nullptr) :
+            railSignal(_railSignal), foe(_foe), constraint(_constraint) {}
         // indices along route
         const MSRailSignal* railSignal;
         const SUMOVehicle* foe;
         MSRailSignalConstraint* constraint;
-        // whether this waiting relation is due to a loaded deadlock
-        bool loadedDeadlock;
     };
     std::map<const SUMOVehicle*, WaitRelation> myWaitRelations;
 
@@ -150,7 +148,7 @@ private:
     // @brief index in list of loaded deadlocks, index of signal in list of signals
     std::map<const MSRailSignal*, std::vector<std::pair<int, int> > > mySignalDeadlocks;
 
-    std::map<const MSDriveWay*, std::set<const MSDriveWay*>> myDriveWaySucc;
+    std::map<const MSDriveWay*, std::set<const MSDriveWay*, ComparatorNumericalIdLess>> myDriveWaySucc;
     std::map<const MSDriveWay*, std::set<const MSDriveWay*>> myDriveWayPred;
 
     /// @brief list of all rail signals
