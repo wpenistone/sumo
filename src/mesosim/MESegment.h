@@ -67,6 +67,7 @@ public:
         SUMOTime minorPenalty;
         bool overtaking;
         double edgeLength;
+        double lookahead;
     };
 
 
@@ -401,6 +402,16 @@ public:
     /// @brief get the last headway time in seconds
     inline double getLastHeadwaySeconds() const {
         return STEPS2TIME(myLastHeadway);
+    }
+
+    /// @brief get the last headway time
+    inline SUMOTime getLastHeadway() const {
+        return myLastHeadway;
+    }
+
+    /// @brief restores the last headway time (when loading state)
+    void setLastHeadway(SUMOTime headway) {
+        myLastHeadway = headway;
     }
 
     /// @brief get the earliest entry time in seconds
